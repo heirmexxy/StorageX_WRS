@@ -1,0 +1,16 @@
+# Personal data never goes into git
+out/
+legacy/
+*.sql.gz
+*.dump
+data_issues*.csv
+
+# Local env and secrets
+.env
+.env.*
+!.env.example
+
+# Build and dependencies
+node_modules/
+dist/
+.DS_Store
