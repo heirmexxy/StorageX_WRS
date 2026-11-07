@@ -1,0 +1,33 @@
+{
+  "name": "storagex-wrs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StorageX WRS — Kitovu's warehouse receipt system",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node dist/server.mjs",
+    "dev": "node build.mjs && node dist/server.mjs",
+    "migrate": "node dist/cli.mjs migrate",
+    "seed": "node dist/cli.mjs seed",
+    "make-admin": "node dist/cli.mjs make-admin",
+    "backup": "node dist/cli.mjs backup",
+    "restore-check": "node dist/cli.mjs restore-check",
+    "test": "node build.mjs && node dist/tests.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pg": "^8.13.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

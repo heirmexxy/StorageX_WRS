@@ -1,0 +1,22 @@
+# Build order
+
+Each build ends with a check that proves it works. Gates are joint reviews with the pilot lender.
+
+| # | Build | Done when | Status |
+| --- | --- | --- | --- |
+| 0 | Schema, reference data, legacy import | Legacy farmers, agents, warehouses and receipt migrated to the standard | Done (Nov 2026) |
+| 1 | Foundations: sign-in, mandatory two-step codes, organisation roles, audit log, money, tests, deploy and backups | Staff sign in with 2FA, roles are enforced, a deploy runs, a backup restores | Done (Nov 2026) |
+| 2 | Registry: farmers, field partners, warehouses, commodities; KYC hook; consent; legacy review queue | Field teams re-verify migrated farmers and register new ones | Next |
+| 3 | Offline intake app (Android) with evidence pack | A delivery with no network becomes a synced intake record | |
+| 4 | Receipt ledger, Receipt Passport (signed QR, verify page, PDF) | A scanned receipt shows its true status; history cannot be edited | |
+| 5 | Stock control: stacks, movements, counts, reconciliation | Physical counts reconcile to receipts | |
+| 6 | Valuation: price sources, haircuts, daily revaluation, LTV | Every receipt has a dated, explainable value | |
+| 7 | Finance engine for any lender (Kitovu included): products, batches, lien lock, disbursement, NCR data | Two lenders fund receipts; no receipt is pledged twice | |
+| 8 | Settlement: sale, collection matching, waterfall, statements, lien release | One full cycle from delivery to farmer balance paid | |
+| 9 | Lender control tower | The lender runs a dry run alone | |
+| 10 | Farmer SMS and USSD status | Farmers know what is happening without calling | |
+| 11 | Agents: intake inspector, batch reviewer, data steward | Suspicious intakes are held before issue | |
+| 12 | Pilot hardening: security review, DPIA, off-site backups, UAT, SOPs | **Gate: pilot launch** | |
+| 13–16 | WareGuard link, collateral watch, farmer assistant, lender and compliance agents | Gate: pilot review | |
+| 17–21 | Partner warehouses, distribution API, ComboTrader pilot, buyer desk, second lender | Gate: second lender live | |
+| 22–25 | Self-service onboarding, billing, Tier C/D, credit history, insurer portal, TradeChainX, public site | **Gate: public launch** | |

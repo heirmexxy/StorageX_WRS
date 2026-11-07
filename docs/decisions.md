@@ -2,6 +2,14 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-07 (Build 1)
+
+1. **Two-step sign-in is mandatory for every account**, Kitovu staff and partners alike. Recovery codes are issued once; administrators can reset the second step, which signs the person out everywhere.
+2. **No self-service sign-up or email reset yet.** People join by invitation link and recover by an administrator-issued reset link, shared over WhatsApp or email. Automatic email comes with a mail provider later.
+3. **Kitovu roles reach every organisation; other roles only their own.** Nobody can grant a role carrying permissions they do not hold, and only a super admin can make another.
+4. **Deploys are manual** (Actions → Deploy), always after the tests pass, with a database backup first. Tests run on every push.
+5. **The audit log is append-only and hash-chained.** Kitovu administrators see the integrity check on the audit page; `cli verify-audit` runs it from the server.
+
 ## 2026-11-07
 
 1. **StorageX is lender-agnostic, and Kitovu is one of the lenders.** Accion's requirements set the bar, but financing is a pluggable role: any approved lender (MFBs, banks, funds) and Kitovu's own balance sheet use the same loan, lien and settlement model. Each lender sees only what it finances.

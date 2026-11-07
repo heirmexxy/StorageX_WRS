@@ -1,4 +1,5 @@
 -- StorageX WRS: core schema, first migration.
+-- Applied by `npm run migrate` inside one transaction (no BEGIN/COMMIT in migration files).
 -- Conventions (see docs/data-standard.md):
 --   * Primary keys are UUIDs; people-facing codes are separate, readable and unique.
 --   * Money is integer kobo (NGN 1 = 100 kobo). Weights are kilograms, numeric(14,2).
@@ -6,7 +7,6 @@
 --   * Receipt history lives in receipt_events, which is append-only and hash-chained.
 --   * Nothing is hard-deleted; records carry a status and, where relevant, a reason.
 
-BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS citext;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- gen_random_bytes for verify tokens
@@ -225,4 +225,3 @@ CREATE TABLE data_issues (
   resolved_by   text
 );
 
-COMMIT;

@@ -1,0 +1,26 @@
+# Manual deploy: GitHub → Actions → Deploy → Run workflow. Runs the tests first, then updates the VPS over SSH.
+# Needs repository secrets VPS_HOST (server IP) and VPS_SSH_KEY (printed at the end of deploy/setup.sh).
+name: Deploy
+on:
+  workflow_dispatch:
+concurrency: deploy-production
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Deploy over SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          if [ -z "$VPS_HOST" ] || [ -z "$VPS_SSH_KEY" ]; then echo "::error::Set the VPS_HOST and VPS_SSH_KEY repository secrets first."; exit 1; fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null || { echo "::error::VPS_SSH_KEY is not a readable private key."; exit 1; }
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 storagex@"$VPS_HOST" '/srv/storagex/deploy/update.sh'

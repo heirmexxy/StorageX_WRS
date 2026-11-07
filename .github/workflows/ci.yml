@@ -1,0 +1,30 @@
+# Tests on every push and pull request, against a real PostgreSQL 16.
+# Deploying is a separate, manual workflow (deploy.yml), because this system holds lender-relevant records.
+name: Tests
+on:
+  push:
+  pull_request:
+  workflow_call:
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: storagex
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: storagex_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U storagex" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://storagex:test@127.0.0.1:5432/storagex_test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm test

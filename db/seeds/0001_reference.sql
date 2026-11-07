@@ -1,7 +1,6 @@
 -- Reference data: states (ISO 3166-2:NG), the Kitovu organisation and the commodity list.
 -- LGAs are loaded from an official list in a later seed; imports may add the few they reference.
 
-BEGIN;
 
 INSERT INTO states (code, name) VALUES
 ('AB','Abia'),('AD','Adamawa'),('AK','Akwa Ibom'),('AN','Anambra'),('BA','Bauchi'),('BY','Bayelsa'),
@@ -38,4 +37,3 @@ INSERT INTO commodities (code, name, category, unit, storable, max_moisture_pct)
 ('ONS','Onion','vegetable','kg',false,NULL)
 ON CONFLICT (code) DO NOTHING;
 
-COMMIT;
