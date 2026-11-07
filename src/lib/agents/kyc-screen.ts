@@ -9,6 +9,8 @@ import { audit, systemActor } from '../audit';
 import { fileRow, readFile } from '../files';
 import { similar } from '../registry';
 import { getSettings } from '../settings';
+import { defaultModel, type ModelCall } from './model';
+export type { ModelCall } from './model';
 
 export const PROMPT_VERSION = 'kyc-screen-1';
 
@@ -94,21 +96,8 @@ export function parseFindings(text: string): Findings {
   };
 }
 
-export type ModelCall = (system: string, content: unknown[]) => Promise<{ text: string; tin: number; tout: number }>;
-
-const callAnthropic: ModelCall = async (system, content) => {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST', signal: AbortSignal.timeout(90_000),
-    headers: { 'x-api-key': config.anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: config.aiModel, max_tokens: 1200, system, messages: [{ role: 'user', content }] }),
-  });
-  const j: any = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j?.error?.message || `Claude API ${res.status}`);
-  return { text: (j.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join(''), tin: j.usage?.input_tokens || 0, tout: j.usage?.output_tokens || 0 };
-};
-
 /** Runs the pre-check for one submission and stores the result. Never throws: a failure is recorded and the human reviews as usual. */
-export async function screenSubmission(submissionId: string, call: ModelCall | null = config.anthropicKey ? callAnthropic : null) {
+export async function screenSubmission(submissionId: string, call: ModelCall | null = defaultModel()) {
   const s = await db.get<Record4Screen & { id_doc_file_id: string; selfie_file_id: string; farmer_id: string; status: string }>(
     `SELECT k.id_doc_file_id, k.selfie_file_id, k.farmer_id, k.status, k.id_type, k.id_last4, f.full_name, f.year_of_birth, st.name AS state_name
      FROM kyc_submissions k JOIN farmers f ON f.id=k.farmer_id LEFT JOIN states st ON st.code=f.state_code WHERE k.id=$1`, submissionId);

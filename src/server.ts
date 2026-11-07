@@ -14,9 +14,15 @@ import { ErrorPage } from './views/auth';
 import './routes/auth';
 import './routes/admin';
 import './routes/registry';
+import './routes/intake';
 
 const CSP = ["default-src 'self'", "img-src 'self' data:", "style-src 'self'", "script-src 'self'", "form-action 'self'", "frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'"].join('; ');
-const STATIC: Record<string, string> = { '/app.css': 'text/css; charset=utf-8', '/favicon.ico': 'image/x-icon' };
+const STATIC: Record<string, string> = {
+  '/app.css': 'text/css; charset=utf-8', '/favicon.ico': 'image/x-icon',
+  // The gate app (Build 3): a static shell that works offline; data comes from /api/intake.
+  '/intake/': 'text/html; charset=utf-8', '/intake/app.js': 'application/javascript; charset=utf-8', '/intake/sw.js': 'application/javascript; charset=utf-8',
+  '/intake/intake.css': 'text/css; charset=utf-8', '/intake/manifest.webmanifest': 'application/manifest+json', '/intake/icon-192.png': 'image/png', '/intake/icon-512.png': 'image/png',
+};
 const PUBLIC = path.resolve('public');
 
 function securityHeaders(res: http.ServerResponse) {
@@ -24,7 +30,7 @@ function securityHeaders(res: http.ServerResponse) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(self)');
   if (config.production) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 }
 
@@ -49,9 +55,12 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
     catch { res.writeHead(503, { 'Content-Type': 'application/json' }); res.end('{"ok":false,"db":"down"}'); }
     return;
   }
+  if (urlPath === '/intake') { res.writeHead(301, { Location: '/intake/' }); return void res.end(); }
   if (STATIC[urlPath] && (req.method === 'GET' || req.method === 'HEAD')) {
-    const file = path.join(PUBLIC, urlPath);
-    if (fs.existsSync(file)) { res.writeHead(200, { 'Content-Type': STATIC[urlPath], 'Cache-Control': 'public, max-age=3600' }); return void fs.createReadStream(file).pipe(res); }
+    const file = path.join(PUBLIC, urlPath.endsWith('/') ? urlPath + 'index.html' : urlPath);
+    // Gate app files revalidate every time so phones pick up fixes; the offline worker keeps a copy.
+    const cache = urlPath.startsWith('/intake/') ? 'no-cache' : 'public, max-age=3600';
+    if (fs.existsSync(file)) { res.writeHead(200, { 'Content-Type': STATIC[urlPath], 'Cache-Control': cache }); return void fs.createReadStream(file).pipe(res); }
   }
 
   const c = new Ctx(req, res);

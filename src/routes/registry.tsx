@@ -12,6 +12,7 @@ import { render } from '../views/layout';
 import { FarmersPage, FarmerNewPage, FarmerPage, KycReviewPage, ReviewQueuePage, FieldPartnersPage, WarehousesPage, WarehousePage, type FarmerView } from '../views/registry';
 import { ApplyPage, ApplyThanksPage, ApplicationsPage } from '../views/apply';
 import { act } from './admin';
+import { deliveriesOf } from '../lib/intake';
 import { can } from '../lib/rbac';
 import { screenSubmission } from '../lib/agents/kyc-screen';
 import * as S from '../lib/settings';
@@ -46,6 +47,7 @@ async function farmerView(c: Ctx, extra: Partial<FarmerView> = {}) {
     subs: kit || c.membership?.org_kind !== 'lender' ? await K.submissionsFor(f.id) : [],
     consents: c.membership?.org_kind === 'lender' ? [] : await K.consentsFor(f.id),
     verifs: await K.verificationsFor(c.actor, f.id),
+    deliveries: c.membership?.org_kind === 'lender' ? [] : await deliveriesOf(f.id),
     issues: kit && can(c.membership, 'farmers.edit') ? await R.openIssues(c.actor, { entity: 'farmer', entityId: f.id, includeInfo: true, includeResolved: true }) : [],
     ...extra,
   };

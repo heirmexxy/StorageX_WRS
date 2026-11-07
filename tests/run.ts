@@ -19,6 +19,12 @@ import * as R from '../src/lib/registry';
 import * as K from '../src/lib/kyc';
 import * as P from '../src/lib/applications';
 import * as S from '../src/lib/settings';
+import * as I from '../src/lib/intake';
+import { screenIntake } from '../src/lib/agents/intake-screen';
+import vm from 'node:vm';
+import { transformSync } from 'esbuild';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { screenSubmission, flagOf, parseFindings, latestCheck, type ModelCall } from '../src/lib/agents/kyc-screen';
 
 let pass = 0, fail = 0;
@@ -401,6 +407,123 @@ async function main() {
     ok((await K.reviewQueue(compliance)).some((r) => r.id === id), 'still in the human queue');
   });
 
+  console.log('\nGate app: deliveries');
+  await t('the gate app uses only syntax old Android browsers understand (ES5)', () => {
+    for (const f of ['public/intake/app.js', 'public/intake/sw.js']) transformSync(fs.readFileSync(f, 'utf8'), { target: 'es5', loader: 'js' });
+  });
+  await t('the phone app’s SHA-256 and canonical JSON match the server’s', () => {
+    const src = fs.readFileSync('public/intake/app.js', 'utf8');
+    const grab = (name: string) => { const i = src.indexOf('function ' + name + '('); let d = 0, j = src.indexOf('{', i); for (; j < src.length; j++) { if (src[j] === '{') d++; if (src[j] === '}' && --d === 0) break; } return src.slice(i, j + 1); };
+    const kStart = src.indexOf('var K = ['), kEnd = src.indexOf('];', kStart) + 2;
+    const ctx: any = { Uint8Array, unescape, encodeURIComponent, JSON, Object };
+    vm.runInNewContext(src.slice(kStart, kEnd) + grab('sha256') + grab('utf8') + grab('canonical') + ';this.f={sha256:sha256,utf8:utf8,canonical:canonical};', ctx);
+    for (const n of [0, 1, 55, 56, 63, 64, 65, 1000, 70001]) { const b = crypto.randomBytes(n); eq(ctx.f.sha256(new Uint8Array(b)), I.sha256hex(b), `length ${n}`); }
+    const rec = { z: 1, a: [1.5, null, 'ẹ̀ Ọ̀'], m: { y: true, b: 'x' }, n: null };
+    eq(ctx.f.canonical(rec), I.canonical(rec));
+    eq(ctx.f.sha256(ctx.f.utf8(I.canonical(rec))), I.sha256hex(I.canonical(rec)));
+  });
+  const devId = crypto.randomUUID();
+  let seq = 0, lastHash: string | null = null;
+  const wh = (await db.get<{ id: string }>(`SELECT id FROM warehouses WHERE code='WH-NI-MNA-02'`))!;
+  const photo = (n: number) => { const d = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), crypto.randomBytes(300), Buffer.from([n])]); return { sha: I.sha256hex(d), up: { filename: 'p.jpg', type: 'image/jpeg', data: d } }; };
+  function makeRecord(clerk: A.Actor, o: Record<string, any> = {}, x: { chain?: boolean; seqOverride?: number } = {}) {
+    const ps = [photo(1), photo(2), photo(3), photo(4)];
+    const s = x.seqOverride ?? seq + 1;
+    const rec: any = {
+      v: 1, id: crypto.randomUUID(), device_id: devId, device_seq: s, prev_hash: lastHash, warehouse_id: wh.id, farmer_code: ada, commodity_code: 'MAZ',
+      weighings: [{ bags: 10, gross_kg: 1005.5, photo: ps[0].sha }], tare_per_bag_kg: 0.5, moisture_pct: 12.5, moisture_photo: ps[1].sha, foreign_matter_pct: 1, damaged_pct: null,
+      grade: 'A', stack_ref: 'B3', notes: null, bag_photos: [ps[2].sha], farmer_confirmation: 'paper_slip', slip_photo: ps[3].sha, confirm_token: null,
+      captured_at: new Date(Date.now() - 600000).toISOString(), started_at: new Date(Date.now() - 1200000).toISOString(), gps: { lat: 9.6105, lng: 6.5502, acc: 12 }, gps_note: null, clerk_user_id: clerk.user.id, ...o,
+    };
+    rec.evidence_hash = I.recordHash(rec);
+    const files: Record<string, any> = {}; for (const p of ps) files['p_' + p.sha] = p.up;
+    if (x.chain !== false) { seq = s; lastHash = rec.evidence_hash; }
+    return { rec, json: JSON.stringify(rec), files };
+  }
+  let firstRef = '';
+  await t('a sealed delivery uploads, computes net weight, and re-upload is harmless', async () => {
+    const b = await I.bootstrap(ops);
+    ok(b.warehouses.some((w: any) => w.id === wh.id)); ok(b.farmers.length > 0); ok(!JSON.stringify(b.farmers).includes('+234'), 'no full phones on the device');
+    const r1 = makeRecord(ops);
+    const out = await I.ingest(ops, r1.json, r1.files, { deviceClock: new Date().toISOString() });
+    eq(out.result, 'stored'); firstRef = out.ref;
+    eq(out.flags.map((f) => f.code), [], 'clean delivery has no flags');
+    const row = await db.get<any>('SELECT net_kg::float AS net, bags FROM intakes WHERE id=$1', r1.rec.id);
+    eq(row.net, 1000.5); eq(row.bags, 10);
+    eq((await I.ingest(ops, r1.json, r1.files)).result, 'duplicate');
+    const changed = { ...r1.rec, notes: 'x' }; changed.evidence_hash = I.recordHash(changed);
+    ok((await rejects(I.ingest(ops, JSON.stringify(changed), r1.files))) instanceof I.Conflict);
+  });
+  await t('changed numbers, swapped photos and another person’s records are refused', async () => {
+    const r = makeRecord(ops, {}, { chain: false });
+    const tampered = JSON.parse(r.json); tampered.weighings[0].gross_kg = 1500;
+    await rejects(I.ingest(ops, JSON.stringify(tampered), r.files));
+    const sha = r.rec.weighings[0].photo; const files = { ...r.files, ['p_' + sha]: photo(9).up };
+    await rejects(I.ingest(ops, r.json, files));
+    await rejects(I.ingest(compliance, r.json, r.files));
+  });
+  await t('rules flag the reviewer: moisture, distance, duplicate, unverified farmer, deleted records', async () => {
+    const r = makeRecord(ops, { moisture_pct: 15.5, gps: { lat: 9.9, lng: 6.9, acc: 20 } });
+    const flags = (await I.ingest(ops, r.json, r.files)).flags.map((f) => f.code);
+    ok(flags.includes('moisture_over_limit') && flags.includes('far_from_warehouse') && flags.includes('possible_duplicate'), flags.join());
+    const nobody = await R.createFarmer(ops, { full_name: 'Level Zero', state_code: 'NI' });
+    seq += 2;   // two records "deleted" on the phone
+    const r2 = makeRecord(ops, { farmer_code: nobody, weighings: [{ bags: 4, gross_kg: 402, photo: undefined }] }, { seqOverride: seq + 1 });
+    r2.rec.weighings[0].photo = Object.keys(r2.files)[0].slice(2); r2.rec.evidence_hash = I.recordHash(r2.rec); lastHash = r2.rec.evidence_hash;
+    const f2 = (await I.ingest(ops, JSON.stringify(r2.rec), r2.files)).flags.map((f) => f.code);
+    ok(f2.includes('farmer_not_verified') && f2.includes('device_chain_gap'), f2.join());
+  });
+  await t('uploaded deliveries are sealed: facts cannot be edited or deleted', async () => {
+    await rejects(db.run(`UPDATE intakes SET net_kg=5000 WHERE ref=$1`, firstRef));
+    await rejects(db.run(`DELETE FROM intakes WHERE ref=$1`, firstRef));
+    await rejects(db.run(`DELETE FROM intake_photos`));
+  });
+  await t('review: never by the clerk; serious flags need a reason to accept', async () => {
+    await rejects(I.reviewIntake(ops, firstRef, 'accept', ''));
+    await I.reviewIntake(admin, firstRef, 'accept', '');
+    eq(await db.val('SELECT status FROM intakes WHERE ref=$1', firstRef), 'accepted');
+    await rejects(I.reviewIntake(admin, firstRef, 'reject', 'x y z'));
+    const held = await db.val<string>(`SELECT ref FROM intakes WHERE flags::text LIKE '%moisture_over_limit%'`);
+    await rejects(I.reviewIntake(admin, held!, 'accept', ''));
+    await I.reviewIntake(admin, held!, 'hold', 'Dry to 13% and re-test');
+  });
+  await t('farmer confirms by phone code at the gate', async () => {
+    const r = makeRecord(ops, { farmer_confirmation: 'code', slip_photo: null, confirm_token: 'bad.token', weighings: [{ bags: 2, gross_kg: 201, photo: undefined }] }, { chain: false });
+    await I.sendConfirmCode(ops, ada, 'sms');
+    const token = await I.verifyConfirmCode(ops, ada, r.rec.id, lastCode()!);
+    const sha = Object.keys(r.files)[0].slice(2);
+    const good = { ...r.rec, confirm_token: token, weighings: [{ bags: 2, gross_kg: 201, photo: sha }], device_seq: seq + 1, prev_hash: lastHash };
+    good.evidence_hash = I.recordHash(good);
+    const badRec = { ...good, confirm_token: 'bad.token' }; badRec.evidence_hash = I.recordHash(badRec);
+    await rejects(I.ingest(ops, JSON.stringify(badRec), r.files));
+    eq((await I.ingest(ops, JSON.stringify(good), r.files)).result, 'stored');
+    seq += 1; lastHash = good.evidence_hash;
+  });
+  await t('AI reading of the scale and moisture photos flags typed numbers that differ', async () => {
+    const r = makeRecord(ops, { weighings: [{ bags: 3, gross_kg: 300, photo: undefined }] }, { chain: false });
+    const sha = Object.keys(r.files)[0].slice(2);
+    const rec = { ...r.rec, weighings: [{ bags: 3, gross_kg: 300, photo: sha }], device_seq: seq + 1, prev_hash: lastHash }; rec.evidence_hash = I.recordHash(rec);
+    await I.ingest(ops, JSON.stringify(rec), r.files); seq += 1; lastHash = rec.evidence_hash;
+    const says = (scale: number | null, moisture: number | null) => async () => ({ text: JSON.stringify({ readings: [{ photo: 1, value: scale, confident: scale !== null }, { photo: 2, value: moisture, confident: true }] }), tin: 1, tout: 1 });
+    eq(await screenIntake(rec.id, says(300, 12.5)), 'match');
+    eq(await screenIntake(rec.id, says(380, 12.5)), 'mismatch');
+    const fl = await db.val<any>('SELECT flags FROM intakes WHERE id=$1', rec.id);
+    ok(fl.some((f: any) => f.code === 'display_mismatch' && f.detail.includes('380')));
+    eq(await screenIntake(rec.id, says(null, 12.5)), 'unreadable');
+    eq(await screenIntake(rec.id, null), null);
+  });
+  await t('warehouse operators record only at their own warehouses', async () => {
+    const opId = await db.val<string>(`SELECT id FROM organisations WHERE code='KITWH'`);
+    const clerk = await makeUser(admin, 'clerk@kitwh.test', opId!, 'warehouse_clerk');
+    eq((await I.bootstrap(clerk)).warehouses.map((w: any) => w.id), [wh.id]);
+    await rejects(I.bootstrap(officer));
+    const otherOp = await A.createOrg(admin, { code: 'OTHERWH', name: 'Other Stores', kind: 'warehouse_operator' });
+    const clerk2 = await makeUser(admin, 'clerk@other.test', otherOp, 'warehouse_clerk');
+    const r = makeRecord(clerk2, {}, { chain: false, seqOverride: 1 });
+    const rec = { ...r.rec, device_id: crypto.randomUUID(), prev_hash: null }; rec.evidence_hash = I.recordHash(rec);
+    await rejects(I.ingest(clerk2, JSON.stringify(rec), r.files));
+  });
+
   console.log('\nPartner applications');
   await t('public application → approve creates the org and an admin invitation', async () => {
     eq(await P.submitApplication({ kind: 'lender', org_name: 'Bot Bank', contact_name: 'Bot', email: 'b@b.co', phone: '08011112222', agree: '1', website: 'http://spam' }, '9.9.9.9'), 'spam');
@@ -519,6 +642,24 @@ async function main() {
     eq((await req('GET', `/files/${k.id_doc_file_id}`)).status, 404);
     eq((await req('GET', `/farmers/${code}`)).status, 404, 'no consent, no record');
     eq((await req('GET', '/kyc/review')).status, 403);
+    delete jar.sx_sid;
+  });
+
+  await t('gate app: shell is public, data needs sign-in, upload works over HTTP', async () => {
+    const shell = await req('GET', '/intake/'); eq(shell.status, 200); ok(shell.text.includes('/intake/app.js'));
+    eq((await req('GET', '/intake/sw.js')).status, 200);
+    eq((await req('GET', '/api/intake/bootstrap')).status, 303, 'signed out → sign-in');
+    await signInAs(ops);
+    const boot = await fetch(base + '/api/intake/bootstrap', { headers: { accept: 'application/json', cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') } });
+    const bj: any = await boot.json(); ok(bj.csrf && bj.warehouses.length);
+    const r = makeRecord(ops);
+    const fd = new FormData(); fd.set('_csrf', bj.csrf); fd.set('record', r.json); fd.set('device_clock', new Date().toISOString());
+    for (const [k, v] of Object.entries(r.files) as any) fd.set(k, new Blob([v.data], { type: 'image/jpeg' }), 'p.jpg');
+    const up = await fetch(base + '/api/intake', { method: 'POST', body: fd, headers: { accept: 'application/json', 'x-csrf-token': bj.csrf, cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') } });
+    const uj: any = await up.json(); eq(up.status, 200, JSON.stringify(uj)); eq(uj.result, 'stored');
+    const bad = await fetch(base + '/api/intake', { method: 'POST', body: (() => { const f = new FormData(); f.set('_csrf', bj.csrf); f.set('record', '{}'); return f; })(), headers: { accept: 'application/json', cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') } });
+    eq(bad.status, 400); ok(((await bad.json()) as any).error);
+    const page = await req('GET', `/intakes/${uj.ref}`); eq(page.status, 200); ok(page.text.includes('Weighings'));
     delete jar.sx_sid;
   });
   server.close();

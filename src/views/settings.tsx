@@ -22,10 +22,13 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats }: { c: Ctx; s: 
           {box('phone_check.attested')}
         </section>
         <section className="card">
-          <h2>AI pre-check of ID photos</h2>
+          <h2>AI checks</h2>
           <p className="muted">Reads each ID photo and face photo before a person reviews it, and flags problems (unreadable, wrong name, copy of a copy, expired). It never approves or rejects and does not compare faces. Photos are sent to Anthropic’s API for this; switch it off to keep them on the server only.</p>
           <label className="field"><span>{LABELS['kyc.ai_mode']}</span>
             <select name="kyc.ai_mode" defaultValue={s['kyc.ai_mode']}><option value="assist">On: show findings to the reviewer</option><option value="off">Off</option></select>
+          </label>
+          <label className="field"><span>{LABELS['intake.ai_check']}</span>
+            <select name="intake.ai_check" defaultValue={s['intake.ai_check']}><option value="assist">On: flag deliveries whose photos disagree with the typed numbers</option><option value="off">Off</option></select>
           </label>
           {serverAiOff && <p className="flash info">Switched off in the server settings file (KYC_AI_MODE=off), which overrides this.</p>}
           {!hasKey && <p className="flash info">No ANTHROPIC_API_KEY on this server yet, so the pre-check is skipped.</p>}

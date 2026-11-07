@@ -103,3 +103,15 @@ input[type=checkbox], input[type=radio] { padding: 0; width: 16px; height: 16px;
 .ai.red { border-left-color: var(--bad); background: #fdf3f2; }
 .attest { margin-top: 10px; }
 .attest summary { font-size: 14px; }
+.flaglist { padding-left: 18px; margin: 0; }
+.flaglist li { margin-bottom: 4px; }
+.flaglist li.hold b { color: var(--bad); }
+.flaglist li.review b { color: var(--warn); }
+.flaglist li.info b { color: var(--muted); }
+img.mini { width: 90px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.gallery img { width: 100%; height: 120px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+.gallery figure { margin: 0; }
+.gallery figcaption { font-size: 12px; color: var(--muted); }
+.bad { color: var(--bad); font-weight: 600; }
+.flaglist li { display: block; }

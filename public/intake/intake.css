@@ -1,0 +1,53 @@
+/* Big targets, plain layout, works on small and old screens. */
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.45 -apple-system, Roboto, "Segoe UI", Arial, sans-serif; color: #1d2a22; background: #f6f7f4; }
+#app { max-width: 640px; margin: 0 auto; padding: 0 10px 40px; }
+.loading { padding: 40px 16px; text-align: center; }
+.bar { display: -webkit-box; display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; padding: 10px 2px; }
+.bar b { font-size: 18px; color: #1f6b45; margin-right: 10px; }
+.bar .who { margin-left: auto; color: #5d6b62; font-size: 14px; }
+.dot { font-size: 13px; padding: 2px 8px; border-radius: 99px; }
+.dot.on { background: #e3f1e8; color: #1f6b45; }
+.dot.off { background: #fbf1d9; color: #9a6a00; }
+.card { background: #fff; border: 1px solid #d9e0db; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+h2 { font-size: 17px; margin: 0 0 10px; }
+.field { display: block; margin-bottom: 12px; }
+.field span { display: block; font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.field small, .small { color: #5d6b62; font-size: 13px; }
+input, select { width: 100%; font-size: 17px; padding: 11px 10px; border: 1px solid #c9d2cc; border-radius: 8px; background: #fff; }
+input[type=radio], input[type=checkbox] { width: auto; }
+.btn { display: inline-block; font-size: 16px; padding: 11px 16px; border-radius: 8px; border: 1px solid #c9d2cc; background: #fff; color: #1d2a22; text-decoration: none; margin: 4px 6px 4px 0; cursor: pointer; }
+.btn.primary { background: #1f6b45; border-color: #1f6b45; color: #fff; }
+.btn.big { display: block; width: 100%; font-size: 18px; padding: 14px; text-align: center; margin-top: 6px; }
+.btn[disabled] { opacity: .5; }
+.link { background: none; border: 0; color: #1f6b45; font-size: 15px; padding: 8px 0; text-decoration: underline; cursor: pointer; }
+.link.danger { color: #b3261e; }
+.hidden { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.photo { margin: 6px 0 10px; }
+.thumb { display: block; max-width: 160px; max-height: 120px; margin-top: 6px; border-radius: 6px; border: 1px solid #d9e0db; }
+.thumbs > div { display: inline-block; margin-right: 8px; vertical-align: top; }
+.grid2 { overflow: hidden; }
+.grid2 .field { float: left; width: 48%; margin-right: 4%; }
+.grid2 .field:nth-child(2n) { margin-right: 0; }
+.weigh { border-top: 1px dashed #d9e0db; padding-top: 10px; margin-top: 10px; }
+.total { font-size: 17px; background: #f3f7f4; padding: 10px; border-radius: 8px; }
+.warn { color: #9a6a00; font-size: 14px; }
+.ok { color: #1f6b45; }
+.msg { padding: 10px 12px; border-radius: 8px; border: 1px solid; margin: 0 0 12px; }
+.msg.ok { border-color: #b9d8c6; background: #eef7f1; }
+.msg.error { border-color: #efc2be; background: #fdf0ef; color: #b3261e; }
+.msg.info { border-color: #e5d39b; background: #fdf8e8; }
+.row { overflow: hidden; }
+.row > * { vertical-align: middle; }
+.row input { width: 60%; display: inline-block; margin-right: 6px; }
+.chosen { background: #f3f7f4; padding: 10px; border-radius: 8px; }
+.hits { list-style: none; padding: 0; margin: 6px 0 0; }
+.hit { display: block; width: 100%; text-align: left; font-size: 16px; padding: 10px; border: 1px solid #d9e0db; border-radius: 8px; background: #fff; margin-bottom: 6px; }
+.check { display: block; padding: 6px 0; }
+.todo { color: #b3261e; padding-left: 20px; }
+.recs { list-style: none; padding: 0; margin: 10px 0 0; }
+.rec { border-top: 1px solid #eef1ee; padding: 8px 0; }
+.rec small { display: block; color: #5d6b62; }
+.rec.error small, .rec.retry small { color: #9a6a00; }
+.rec .flags { color: #9a6a00; }
+.chosen .link { margin-left: 8px; }

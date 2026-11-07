@@ -90,6 +90,7 @@ export interface FarmerView {
   f: Farmer; states: Opt[]; crops: Opt[]; subs: Submission[]; consents: any[]; verifs: any[]; issues: Issue[]; lenders: { id: string; name: string }[];
   codeSent?: 'phone' | 'consent'; consentLender?: string;
   pm: { required: boolean; sms: boolean; voice: boolean; attested: boolean };
+  deliveries: any[];
 }
 
 export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
@@ -244,6 +245,19 @@ export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
               </form>
             </div>
           )}
+        </section>
+      )}
+
+      {v.deliveries.length > 0 && (
+        <section className="card">
+          <h2>Deliveries</h2>
+          <table>
+            <thead><tr><th>Ref</th><th>Crop</th><th>Net</th><th>Warehouse</th><th>Date</th><th>Status</th></tr></thead>
+            <tbody>{v.deliveries.map((d) => (
+              <tr key={d.ref}><td>{can(c.membership, 'stock.manage') ? <a className="mono" href={`/intakes/${d.ref}`}>{d.ref}</a> : d.ref}</td><td>{d.commodity}</td>
+                <td>{`${Number(d.net).toLocaleString('en-NG')} kg`}</td><td>{d.warehouse}</td><td>{fmtDay(d.captured_at)}</td><td>{d.status}</td></tr>
+            ))}</tbody>
+          </table>
         </section>
       )}
 

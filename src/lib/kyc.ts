@@ -286,8 +286,12 @@ export const verificationsFor = (a: Actor, farmerId: string) => db.all<{ org_nam
 // ---------- who may open an uploaded file ----------
 export async function canOpenFile(a: Actor, f: { kind: string; entity: string; entity_id: string }) {
   const m = a.membership;
+  // Delivery photos: Kitovu, and the operator of the warehouse where the delivery was recorded.
+  if (f.kind === 'intake_evidence' && m && m.org_kind !== 'kitovu')
+    return can(m, 'stock.manage') && !!(await db.val(`SELECT 1 FROM intakes i JOIN warehouses w ON w.id=i.warehouse_id WHERE i.id=$1 AND w.operator_org_id=$2`, f.entity_id, m.org_id));
   if (!m || m.org_kind !== 'kitovu') return false;           // identity documents never leave Kitovu
   if (f.kind === 'id_document') return can(m, 'kyc.review');
   if (f.kind === 'selfie' || f.kind === 'consent_evidence') return can(m, 'kyc.review') || can(m, 'farmers.edit');
+  if (f.kind === 'intake_evidence') return can(m, 'stock.manage') || can(m, 'warehouses.view');
   return can(m, 'warehouses.edit');
 }

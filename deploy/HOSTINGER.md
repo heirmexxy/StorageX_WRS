@@ -70,3 +70,10 @@ Copy the `APP_SECRET=` line into your password manager. Do not put it in Google 
 2. On the server, `sudo nano /srv/storagex/.env` and set `ANTHROPIC_API_KEY=`. Save.
 3. `sudo systemctl restart storagex`
 4. In the app, **Settings → AI pre-check** should no longer say the key is missing. Submit a test ID check and open **ID checks**: the coloured AI panel appears within about a minute.
+
+## Step 11 — Put the gate app on a clerk's phone
+1. On the clerk's Android phone, open Chrome and go to `https://<your domain>/intake/`.
+2. Sign in with the clerk's account (it must have a warehouse role).
+3. When the app shows the warehouse list, open Chrome's menu (⋮) and tap **Add to Home screen**.
+4. Turn on airplane mode and open the app from the home screen. It should open and show **Offline**.
+5. Record a test delivery, turn airplane mode off, and keep the app open. Within a minute the record should show **Uploaded** and appear under **Deliveries** on the main site.

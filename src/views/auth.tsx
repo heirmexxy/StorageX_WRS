@@ -7,7 +7,7 @@ export function LoginPage({ c, error, email }: { c: Ctx; error?: string; email?:
       <section className="card narrow">
         <h1>Sign in</h1>
         {error && <p className="flash error">{error}</p>}
-        <form method="post" action="/login">
+        <form method="post" action={c.query.next ? `/login?next=${encodeURIComponent(String(c.query.next))}` : "/login"}>
           <Csrf c={c} />
           <Field label="Email" name="email" type="email" value={email} required autoComplete="username" />
           <Field label="Password" name="password" type="password" required autoComplete="current-password" />

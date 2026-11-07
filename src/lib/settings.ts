@@ -13,6 +13,8 @@ export const DEFAULTS = {
   'phone_check.attested': true,   // no phone or no signal: field partner + a named local witness vouch in person
   /** AI pre-check of identity photos for the reviewer: 'assist' or 'off'. The server file can also force it off. */
   'kyc.ai_mode': 'assist' as 'assist' | 'off',
+  /** AI reads the scale and moisture-meter photos of each delivery and compares them with the typed numbers. */
+  'intake.ai_check': 'assist' as 'assist' | 'off',
 };
 export type SettingKey = keyof typeof DEFAULTS;
 export type Settings = typeof DEFAULTS;
@@ -23,6 +25,7 @@ export const LABELS: Record<SettingKey, string> = {
   'phone_check.voice': 'Allow codes by voice call',
   'phone_check.attested': 'Allow witnessed attestation for farmers without a working phone',
   'kyc.ai_mode': 'AI pre-check of ID photos for the reviewer',
+  'intake.ai_check': 'AI reads scale and moisture-meter photos and compares them with the typed numbers',
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -40,7 +43,7 @@ export async function saveSettings(a: Actor, input: Partial<Record<SettingKey, u
     if (!(k in input)) continue;
     const def = DEFAULTS[k];
     if (typeof def === 'boolean') next[k] = input[k] === true || input[k] === '1' || input[k] === 'on';
-    else if (k === 'kyc.ai_mode') next[k] = input[k] === 'off' ? 'off' : 'assist';
+    else if (k === 'kyc.ai_mode' || k === 'intake.ai_check') next[k] = input[k] === 'off' ? 'off' : 'assist';
   }
   if (next['phone_check.required'] && !next['phone_check.sms'] && !next['phone_check.voice'] && !next['phone_check.attested'])
     throw new UserError('A phone check is required, so at least one way to do it must stay on.');
