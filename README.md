@@ -24,11 +24,12 @@ Node 22 and TypeScript, server-rendered React, PostgreSQL 16, built with esbuild
 | `src/lib/agents/intake-screen.ts` | AI reading of scale and moisture-meter photos |
 | `src/lib/receipts.ts`, `sign.ts`, `pdf.ts` | Receipts: issue, split, cancel, Ed25519 signature, public Receipt Passport, printable PDF |
 | `src/lib/stock.ts` | Stock ledger, stacks, releases, adjustments, counts, reconciliation |
+| `src/lib/valuation.ts` | Prices, reference prices, valuation policies, daily revaluation |
 | `src/lib/settings.ts` | Settings changed from the admin screen (phone-check methods, AI pre-check) |
 | `src/lib/agents/kyc-screen.ts` | AI pre-check of identity photos (advisory; flag computed in code) |
 | `src/lib/money.ts` | Kobo parsing and formatting |
 | `src/lib/migrate.ts` | Migration runner (checksummed) and seeds |
-| `src/cli.ts` | `migrate`, `seed`, `make-admin`, `backup`, `restore-check`, `verify-audit`, `purge-files` |
+| `src/cli.ts` | `migrate`, `seed`, `make-admin`, `backup`, `restore-check`, `verify-audit`, `purge-files`, `revalue` |
 | `db/migrations/` | Schema, applied in order |
 | `tools/legacy-import/` | One-off importer from the 2021–22 StorageX dump |
 | `deploy/` | Hostinger VPS setup, update and the step-by-step guide |

@@ -19,6 +19,13 @@ export const DEFAULTS = {
   'stock.tolerance_pct': 1,
   /** Every stack holding stock should be counted at least this often. */
   'stock.count_every_days': 30,
+  /** Reference price = median of approved prices from the last N days (state first, then national). */
+  'price.window_days': 14,
+  'price.min_observations': 2,
+  /** A price this far from the reference needs a written explanation when entered. */
+  'price.outlier_pct': 25,
+  /** A fall in a receipt's price of this much since the last valuation is flagged. */
+  'price.drop_alert_pct': 10,
 };
 export type SettingKey = keyof typeof DEFAULTS;
 export type Settings = typeof DEFAULTS;
@@ -32,6 +39,10 @@ export const LABELS: Record<SettingKey, string> = {
   'intake.ai_check': 'AI reads scale and moisture-meter photos and compares them with the typed numbers',
   'stock.tolerance_pct': 'Allowed shortfall of counted stock against receipts (%)',
   'stock.count_every_days': 'Count every stack at least every (days)',
+  'price.window_days': 'Use prices from the last (days)',
+  'price.min_observations': 'Prices needed before a value is given',
+  'price.outlier_pct': 'Price needs an explanation if it differs from the reference by more than (%)',
+  'price.drop_alert_pct': 'Flag a price fall since the last valuation of more than (%)',
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -52,7 +63,7 @@ export async function saveSettings(a: Actor, input: Partial<Record<SettingKey, u
     else if (k === 'kyc.ai_mode' || k === 'intake.ai_check') next[k] = input[k] === 'off' ? 'off' : 'assist';
     else if (typeof def === 'number') {
       const v = Number(input[k]);
-      const [lo, hi] = k === 'stock.tolerance_pct' ? [0, 5] : [1, 180];
+      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50] } as Record<string, number[]>)[k] ?? [1, 180];
       if (!Number.isFinite(v) || v < lo || v > hi) throw new UserError(`${LABELS[k]}: between ${lo} and ${hi}.`);
       next[k] = v;
     }

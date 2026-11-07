@@ -22,6 +22,7 @@ import * as S from '../src/lib/settings';
 import * as I from '../src/lib/intake';
 import * as Rc from '../src/lib/receipts';
 import * as St from '../src/lib/stock';
+import * as V from '../src/lib/valuation';
 import { verify as sigVerify } from '../src/lib/sign';
 import { screenIntake } from '../src/lib/agents/intake-screen';
 import vm from 'node:vm';
@@ -676,6 +677,57 @@ async function main() {
     ok(await Rc.chainOk(r.id));
   });
 
+  console.log('\nValuation');
+  await t('median, unit conversion and rounding never over-lend', () => {
+    eq(V.median([3, 1, 2]), 2); eq(V.median([1, 2, 3, 4]), 3); eq(V.median([]), null);
+    const ref: any = { kobo_per_kg: 45000 };
+    const v = V.compute(201, ref, { haircut_bp: 1500, max_ltv_bp: 7000 });
+    eq(v.market, 9045000); eq(v.lending, 7688250); eq(v.maxLoan, 5381775);
+    eq(V.compute(1, { kobo_per_kg: 3 } as any, { haircut_bp: 1500, max_ltv_bp: 7000 }).lending, 2, 'haircut rounds up');
+  });
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' });
+  const src = (await V.sources())[0].id;
+  const enter = (who: A.Actor, state: string, naira: string, extra: Record<string, string> = {}) =>
+    V.addObservation(who, { commodity: 'MAZ', state, market: `Market ${state}`, source: src, price: naira, unit: 'bag_100kg', observed_on: today, ...extra });
+  await t('prices: entered by one person, approved by another; enough of them before a value', async () => {
+    await rejects(enter(officer, 'NI', '45000'));
+    const p1 = await enter(ops, 'NI', '45000');
+    eq(p1.perKg, 45000);
+    await rejects(V.decideObservation(ops, p1.id, true, ''));
+    await V.decideObservation(admin, p1.id, true, '');
+    eq((await V.referencePrice('MAZ', 'NI')).scope, 'none', 'one price is not enough');
+    const p2 = await enter(ops, 'KD', '43000'); await V.decideObservation(admin, p2.id, true, '');
+    const nat = await V.referencePrice('MAZ', 'NI'); eq(nat.scope, 'national'); eq(nat.kobo_per_kg, 44000);
+    const p3 = await enter(ops, 'NI', '46000'); await V.decideObservation(admin, p3.id, true, '');
+    const st = await V.referencePrice('MAZ', 'NI'); eq(st.scope, 'state'); eq(st.kobo_per_kg, 45500);
+    await rejects(enter(ops, 'NI', '90000'));
+    ok((await enter(ops, 'NI', '90000', { note: 'Quoted for a premium cleaned grade at a city market' })).outlier! > 25);
+  });
+  let liveNo = '';
+  await t('daily valuation snapshots every live receipt once, and flags price falls', async () => {
+    const r1 = await V.revalueAll();
+    ok(r1.valued >= 1, JSON.stringify(r1));
+    liveNo = (await db.val<string>(`SELECT r.receipt_no FROM receipts r JOIN receipt_valuations v ON v.receipt_id=r.id WHERE v.kobo_per_kg IS NOT NULL LIMIT 1`))!;
+    const again = await V.revalueAll(); eq(again.valued, 0, 'already valued today');
+    await rejects(db.run('UPDATE receipt_valuations SET kobo_per_kg=1'));
+    for (const n of ['30000', '31000', '32000', '30500']) { const p = await enter(ops, 'NI', n, { note: 'Harvest glut, prices falling fast' }); await V.decideObservation(admin, p.id, true, ''); }
+    const r2 = await V.revalueAll(new Date(Date.now() + 86_400_000));
+    ok(r2.drops.some((d) => d.receipt_no === liveNo), JSON.stringify(r2));
+    const r = (await db.get<any>(`SELECT value_kobo, unit_price_kobo FROM receipts WHERE receipt_no=$1`, liveNo))!;
+    ok(Number(r.unit_price_kobo) < 45000);
+  });
+  await t('lenders may set their own haircut and loan-to-value', async () => {
+    const lAdmin = await makeUser(admin, 'finance@accion.test', accionId, 'lender_admin');
+    await rejects(V.setPolicy(officer, 'MAZ', '20', '60'));
+    await rejects(V.setPolicy(lAdmin, 'MAZ', '95', '60'));
+    await V.setPolicy(lAdmin, 'MAZ', '25', '50');
+    const r = (await Rc.receiptByNo(admin, liveNo))!;
+    const mine = (await V.valuationFor(officer, r))!; eq(mine.policy.own, true); eq(mine.policy.max_ltv_bp, 5000);
+    const kit = (await V.valuationFor(admin, r))!; eq(kit.policy.own, false); eq(kit.policy.max_ltv_bp, 7000);
+    ok(mine.maxLoan! < kit.maxLoan!);
+    eq(await V.valuationFor(gateClerk, r), null, 'warehouse staff do not see values');
+  });
+
   console.log('\nPartner applications');
   await t('public application → approve creates the org and an admin invitation', async () => {
     eq(await P.submitApplication({ kind: 'lender', org_name: 'Bot Bank', contact_name: 'Bot', email: 'b@b.co', phone: '08011112222', agree: '1', website: 'http://spam' }, '9.9.9.9'), 'spam');
@@ -819,6 +871,9 @@ async function main() {
     const r = (await Rc.receiptByNo(admin, rno))!;
     const pg = await req('GET', `/r/${r.verify_token}?s=${r.signature}`); eq(pg.status, 200); ok(pg.text.includes('Closed') && pg.text.includes(rno));
     eq((await req('GET', `/r/${'f'.repeat(32)}`)).status, 404);
+    await signInAs(admin);
+    eq((await req('POST', '/prices/revalue', {})).status, 303, 'revalue route is not taken for a price id');
+    delete jar.sx_sid;
     const k = await req('GET', '/.well-known/storagex-receipt-key.json'); eq(k.status, 200); ok(JSON.parse(k.text).keys[0].crv === 'Ed25519');
   });
   server.close();

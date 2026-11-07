@@ -2,6 +2,14 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-07 (Build 6)
+
+1. **Prices come from named sources and need a second person.** Kitovu finance or operations enter a price (crop, state, market, source, price as quoted, date, optional evidence); someone in Kitovu finance other than the enterer approves it. A price more than 25% (Settings) away from the current reference needs a written explanation.
+2. **Reference price = median of approved prices over the last 14 days** (Settings), for the warehouse's state when there are at least 2 (Settings), otherwise national, otherwise no value. Median, not average, so one odd quote cannot move it.
+3. **Value is explained line by line:** market value = kg still held × reference price; after haircut (price-fall and quality risk); maximum loan = that × loan-to-value. The haircut rounds up and the advance rounds down, so rounding never over-lends. The receipt page lists the exact prices used.
+4. **Kitovu sets a default policy per crop (15% haircut, 70% loan-to-value to start); each lender can set its own**, and sees values under its own policy. Warehouse staff do not see values. The public Receipt Passport shows no value.
+5. **Every live receipt is valued every morning** (`revalue`, 05:15 cron) into an append-only daily table with its basis; running it twice in a day changes nothing. A price fall of more than 10% (Settings) since the last valuation is reported; in Build 7 it feeds margin alerts on loans.
+
 ## 2026-11-07 (Build 5)
 
 1. **One append-only stock ledger** (`stock_moves`): accepted deliveries in, releases out, moves between stacks, approved adjustments. Balances are sums; nothing is edited. Deliveries go onto the stack the clerk named (created if new), otherwise they wait as "not on a stack" until placed.

@@ -4,6 +4,7 @@ import { EVENT_LABEL } from '../lib/receipts';
 import { can } from '../lib/rbac';
 import { qrSvg } from '../lib/qr';
 import { Page, Csrf, fmtDate, fmtDay } from './layout';
+import { ValuePanel } from './valuation';
 
 const kg = (n: number | string) => `${Number(n).toLocaleString('en-NG', { maximumFractionDigits: 2 })} kg`;
 const TONE: Record<string, string> = { issued: 'ok', pledged: 'warn', financed: 'warn', sale_approved: 'warn', partially_released: 'warn', under_exception: 'warn' };
@@ -38,7 +39,7 @@ export function ReceiptsPage({ c, rows, q }: { c: Ctx; rows: Receipt[]; q: Recor
   );
 }
 
-export function ReceiptPage({ c, r, events, chainOk, url, bal, rels }: { c: Ctx; r: Receipt; events: any[]; chainOk: boolean; url: string; bal?: { remaining_kg: number; released_kg: number }; rels?: any[] }) {
+export function ReceiptPage({ c, r, events, chainOk, url, bal, rels, value }: { c: Ctx; r: Receipt; events: any[]; chainOk: boolean; url: string; bal?: { remaining_kg: number; released_kg: number }; rels?: any[]; value?: any }) {
   const kitovu = c.membership?.org_kind === 'kitovu';
   return (
     <Page c={c} title={r.receipt_no}>
@@ -63,6 +64,7 @@ export function ReceiptPage({ c, r, events, chainOk, url, bal, rels }: { c: Ctx;
           <p className="small muted">Anyone can scan this to see the live status. The QR carries a signature over the receipt’s facts.</p>
         </section>
       </div>
+      {value && <ValuePanel v={value} />}
       <section className="card">
         <h2>History</h2>
         <p className={chainOk ? 'ok' : 'bad'}>{chainOk ? `History intact: ${events.length} event${events.length === 1 ? '' : 's'}, each sealed to the one before.` : 'History check FAILED: an event does not match its seal. Report this to Kitovu at once.'}</p>

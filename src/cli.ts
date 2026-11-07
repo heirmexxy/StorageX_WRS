@@ -5,6 +5,7 @@
 //   backup [file]                pg_dump the database (custom format) into BACKUP_DIR
 //   restore-check <file>         restore a backup into a throwaway database and count rows (proves backups work)
 //   verify-audit                 check the audit log hash chain
+//   revalue                      value every live receipt for today (run daily)
 //   purge-files                  delete ID photos whose retention date has passed (run daily)
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -12,6 +13,7 @@ import path from 'node:path';
 import { config } from './lib/config';
 import { closePool, db, openPool } from './lib/db';
 import { purgeExpiredFiles } from './lib/files';
+import { revalueAll } from './lib/valuation';
 import { migrate, seed } from './lib/migrate';
 import { bootstrapSuperAdmin } from './lib/auth';
 import { verifyAuditChain } from './lib/audit';
@@ -68,6 +70,12 @@ async function main() {
       }
       break;
     }
+    case 'revalue': {
+      const r = await revalueAll();
+      console.log(`${r.day}: valued ${r.valued}, without price ${r.unpriced}, price falls over the alert level ${r.drops.length}`);
+      for (const d of r.drops) console.log(`  ${d.receipt_no}: ${d.change_pct}%`);
+      break;
+    }
     case 'purge-files': {
       console.log(`removed ${await purgeExpiredFiles()} expired file(s)`);
       break;
@@ -79,7 +87,7 @@ async function main() {
       break;
     }
     default:
-      console.log('commands: migrate | seed | make-admin <email> <name> | backup [file] | restore-check <file> | verify-audit | purge-files');
+      console.log('commands: migrate | seed | make-admin <email> <name> | backup [file] | restore-check <file> | verify-audit | purge-files | revalue');
       process.exitCode = 1;
   }
 }

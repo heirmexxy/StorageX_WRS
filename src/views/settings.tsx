@@ -39,6 +39,12 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats }: { c: Ctx; s: 
           <label className="field"><span>{LABELS['stock.tolerance_pct']}</span><input name="stock.tolerance_pct" type="number" step="0.1" min="0" max="5" defaultValue={String(s['stock.tolerance_pct'])} /><small>Stored grain loses a little weight; a shortfall above this is flagged as serious.</small></label>
           <label className="field"><span>{LABELS['stock.count_every_days']}</span><input name="stock.count_every_days" type="number" min="1" max="180" defaultValue={String(s['stock.count_every_days'])} /></label>
         </section>
+        <section className="card">
+          <h2>Prices and valuation</h2>
+          {(['price.window_days', 'price.min_observations', 'price.outlier_pct', 'price.drop_alert_pct'] as const).map((k) => (
+            <label className="field" key={k}><span>{LABELS[k]}</span><input name={k} type="number" step="1" defaultValue={String(s[k])} /></label>
+          ))}
+        </section>
         <button className="primary">Save settings</button>
       </form>
     </Page>

@@ -330,10 +330,11 @@ esac
 
 say "9/9 Backups and the deploy key for GitHub"
 CRON1="15 2 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs backup >> data/backups/backup.log 2>&1 && find data/backups -name '*.dump' -mtime +30 -delete"
+CRON4="15 5 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs revalue >> data/backups/revalue.log 2>&1"
 CRON3="30 4 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs purge-files >> data/backups/purge-files.log 2>&1"
 CRON2="45 3 * * 0 cd $APP_DIR && $NODE_BIN/node dist/cli.mjs restore-check \$(ls -1t data/backups/*.dump | head -1) >> data/backups/restore-check.log 2>&1"
 # (a fresh user has no crontab yet: that is not an error)
-{ crontab -u "$APP_USER" -l 2>/dev/null | grep -v 'dist/cli.mjs backup' | grep -v 'dist/cli.mjs restore-check' | grep -v 'dist/cli.mjs purge-files' || true; echo "$CRON1"; echo "$CRON2"; echo "$CRON3"; } | crontab -u "$APP_USER" -
+{ crontab -u "$APP_USER" -l 2>/dev/null | grep -v 'dist/cli.mjs backup' | grep -v 'dist/cli.mjs restore-check' | grep -v 'dist/cli.mjs purge-files' | grep -v 'dist/cli.mjs revalue' || true; echo "$CRON1"; echo "$CRON2"; echo "$CRON3"; echo "$CRON4"; } | crontab -u "$APP_USER" -
 KEY=/home/$APP_USER/.ssh/github_actions
 if [ ! -f "$KEY" ]; then
   sudo -u "$APP_USER" ssh-keygen -t ed25519 -N '' -C "github-actions-deploy" -f "$KEY" >/dev/null

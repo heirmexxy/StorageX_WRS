@@ -10,8 +10,8 @@ Each build ends with a check that proves it works. Gates are joint reviews with 
 | 3 | Offline gate app (installable web app, old phones) with sealed evidence pack, AI reading of scale and moisture displays, delivery review | A delivery with no network becomes a synced intake record | Done (Nov 2026) |
 | 4 | Receipt ledger, Receipt Passport (signed QR, verify page, PDF), split receipts, cancel | A scanned receipt shows its true status; history cannot be edited | Done (Nov 2026) |
 | 5 | Stock control: stacks, ledger, releases, adjustments, counts, reconciliation, under-review switch | Physical counts reconcile to receipts | Done (Nov 2026) |
-| 6 | Valuation: price sources, haircuts, daily revaluation, LTV | Every receipt has a dated, explainable value | Next |
-| 7 | Finance engine for any lender (Kitovu included): products, batches, lien lock, disbursement, NCR data | Two lenders fund receipts; no receipt is pledged twice | |
+| 6 | Valuation: price sources with approval, median reference prices, lender policies (haircut, LTV), daily revaluation | Every receipt has a dated, explainable value | Done (Nov 2026) |
+| 7 | Finance engine for any lender (Kitovu included): products, batches, lien lock, disbursement, NCR data | Two lenders fund receipts; no receipt is pledged twice | Next |
 | 8 | Settlement: sale, collection matching, waterfall, statements, lien release | One full cycle from delivery to farmer balance paid | |
 | 9 | Lender control tower | The lender runs a dry run alone | |
 | 10 | Farmer SMS and USSD status | Farmers know what is happening without calling | |
