@@ -11,7 +11,7 @@ Every record in StorageX WRS follows these rules. The schema enforces most of th
 | Receipt verification | Random 128-bit `verify_token` in the QR code; the public check shows status, never personal data | — |
 | Money | Integer kobo (₦1 = 100 kobo). No floats anywhere | ₦360/kg = `36000` |
 | Weight | Kilograms, two decimals. Bags are a separate count | `1006.20` |
-| Phone | E.164 (`+234…`). Not unique: households share phones | `+2348031234567` |
+| Phone | E.164 (`+234…`). Not unique: households share phones | `+234XXXXXXXXXX` |
 | Email | Lower-case, validated; suspect domains (e.g. `ail.com`) are not stored until confirmed | — |
 | Location | State by ISO code; LGA from the official list; community and address as given | `TA`, Karim Lamido |
 | Commodities | Three-letter codes from `commodities`; a farmer's crops are a list of codes | `{RCE,MAZ}` |
