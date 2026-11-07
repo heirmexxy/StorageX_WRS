@@ -17,8 +17,7 @@ get('/loans', 'perm:finance.view', async (c) => {
 });
 get('/loans/ncr.csv', 'perm:finance.view', async (c) => {
   const csv = await F.ncrCsv(c.actor);
-  c.res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="storagex-ncr-${new Date().toISOString().slice(0, 10)}.csv"`, 'Cache-Control': 'no-store' });
-  c.res.end(csv);
+  c.download(csv, 'text/csv; charset=utf-8', `storagex-ncr-${new Date().toISOString().slice(0, 10)}.csv`);
 });
 post('/loans/products', 'perm:finance.configure', (c) => act(c, '/loans', async () => { await F.createProduct(c.actor, c.body); return 'Product added.'; }));
 post('/loans/batches', 'perm:receipts.issue', async (c) => {

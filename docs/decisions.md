@@ -2,6 +2,15 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-07 (Build 9)
+
+1. **Lenders start in a control tower**, not the loans list. It answers, in order: what we are owed and what stands behind it; what needs a decision today; which loans are past the lender's own warning or liquidation level, overdue, without a price, or due within 14 days; where the stock is and whether its warehouse checks are clean; and how concentrated the book is by warehouse, crop and state.
+2. **Values are worked out live** from the same reference prices and loan entries as the rest of the system, so the tower never disagrees with a loan or receipt page. Loan-to-value uses what is owed today (principal, fees, interest), not the amount lent.
+3. **Warehouse health is shown to the lender** for warehouses holding its collateral: insurance on record, date of the last count, reconciliation holds and receipts under review. A lender can see a problem without asking Kitovu.
+4. **The dry-run checklist is computed from real records** (two approvers, a valuation policy, a product, a confirmed farmer account, a decided request, a disbursement, a repayment, the registry file downloaded). It disappears once complete. This is the "done when" for Build 9.
+5. **The loan book downloads as CSV** for the lender's own systems; each download is audited. Kitovu sees the same tower across all lenders.
+6. Found and fixed while testing: file downloads could write a response twice and crash the server. Downloads now go through one helper.
+
 ## 2026-11-07 (Partner types)
 
 1. **Thirteen partner types in four groups**, each stating what the partner brings and gets: finance and trade (lender, buyer or processor, trading platform, insurer); storage and the field (warehouse owner, field agent network, co-operative); services (input supplier, transporter, inspector or collateral manager, payments provider); programmes and government (development partner or guarantee fund, government agency).

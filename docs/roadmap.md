@@ -13,8 +13,8 @@ Each build ends with a check that proves it works. Gates are joint reviews with 
 | 6 | Valuation: price sources with approval, median reference prices, lender policies (haircut, LTV), daily revaluation | Every receipt has a dated, explainable value | Done (Nov 2026) |
 | 7 | Finance engine for any lender (Kitovu included): products, batches with the batch reviewer agent, lien lock, approval and disbursement by different people, repayments, margin watch, NCR file | Two lenders fund receipts; no receipt is pledged twice | Done (Nov 2026) |
 | 8 | Settlement: sales with farmer agreement and lender approval, buyer payment matching, delivery, waterfall (fees, loan, farmer), payouts, statements | One full cycle from delivery to farmer balance paid | Done (Nov 2026) |
-| 9 | Lender control tower | The lender runs a dry run alone | Next |
-| 10 | Farmer SMS and USSD status | Farmers know what is happening without calling | |
+| 9 | Lender control tower: book with value and loan-to-value, needs-attention list, work queue, collateral sites, concentration, dry-run checklist, loan book download | The lender runs a dry run alone | Done (Nov 2026) |
+| 10 | Farmer SMS and USSD status | Farmers know what is happening without calling | Next |
 | 11 | Agents: intake inspector, data steward (batch reviewer done in Build 7) | Suspicious intakes are held before issue | |
 | 12 | Pilot hardening: security review, DPIA, off-site backups, UAT, SOPs | **Gate: pilot launch** | |
 | 13–16 | WareGuard link, collateral watch, farmer assistant, lender and compliance agents | Gate: pilot review | |

@@ -115,6 +115,7 @@ export class Ctx {
   html(body: string, status = 200) { if (this.head(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })) this.res.end(body); }
   json(data: unknown, status = 200) { if (this.head(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })) this.res.end(JSON.stringify(data)); }
   text(body: string, status = 200) { if (this.head(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })) this.res.end(body); }
+  download(body: string | Buffer, type: string, filename: string) { if (this.head(200, { 'Content-Type': type, 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control': 'no-store' })) this.res.end(body); }
   redirect(to: string, status = 303) { if (this.head(status, { Location: to })) this.res.end(); }
   back(fallback: string, flash?: ['ok' | 'error' | 'info', string]) {
     if (flash) this.setFlash(...flash);

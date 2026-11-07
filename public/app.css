@@ -136,3 +136,18 @@ img.mini { width: 90px; height: 64px; object-fit: cover; border-radius: 6px; bor
 .pt-body { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
 .pt-body b { font-size: 15px; }
 .pt-body i { font-style: normal; color: var(--muted); }
+.tower-top { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.tower-top > div { display: flex; flex-direction: column; gap: 2px; }
+.tower-top b { font-size: 26px; line-height: 1.2; }
+.checklist { list-style: none; padding: 0; margin: 0; }
+.checklist li { padding: 6px 0 6px 28px; position: relative; }
+.checklist li::before { content: ''; position: absolute; left: 0; top: 9px; width: 16px; height: 16px; border: 2px solid var(--line); border-radius: 4px; }
+.checklist li.done { color: var(--muted); }
+.checklist li.done::before { background: var(--ok); border-color: var(--ok); }
+.shares3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.shares3 h3 { font-size: 15px; margin: 0 0 8px; }
+.share { display: grid; grid-template-columns: 1fr 90px auto; gap: 8px; align-items: center; font-size: 14px; margin-bottom: 6px; }
+.share .bar { height: 8px; background: #eef1ee; border-radius: 4px; overflow: hidden; }
+.share .bar i { display: block; height: 100%; background: var(--brand); }
+.share .num { color: var(--muted); white-space: nowrap; }
+@media (max-width: 800px) { .tower-top, .shares3 { grid-template-columns: 1fr 1fr; } }

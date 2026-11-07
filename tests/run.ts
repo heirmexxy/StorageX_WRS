@@ -25,6 +25,7 @@ import * as St from '../src/lib/stock';
 import * as V from '../src/lib/valuation';
 import * as F from '../src/lib/finance';
 import * as SL from '../src/lib/settlement';
+import * as Tw from '../src/lib/tower';
 import { reviewLine } from '../src/lib/agents/batch-review';
 import { verify as sigVerify } from '../src/lib/sign';
 import { screenIntake } from '../src/lib/agents/intake-screen';
@@ -793,6 +794,24 @@ async function main() {
     ok(csv.includes(loanNo) && csv.includes(liveNo) && csv.includes('ACC-CIF-77001'));
     await rejects(F.ncrCsv(gateClerk));
   });
+  await t('control tower: the lender sees its book, the stock behind it, and what to do next', async () => {
+    eq(Tw.towerOrg(officer), accionId); eq(Tw.towerOrg(admin), null);
+    let refused = false; try { Tw.towerOrg(gateClerk); } catch { refused = true; } ok(refused, 'warehouse clerks have no tower');
+    const b = await Tw.book(accionId);
+    const l = b.find((x) => x.loan_no === loanNo)!;
+    ok(l && l.outstanding > l.principal && l.receipts[0].receipt_no === liveNo);
+    ok(l.market! > 0 && l.ltv_bp! > 0 && l.ltv_bp! < 10_000, `ltv ${l.ltv_bp}`);
+    const s = Tw.summarise(b);
+    eq(s.loans, b.length); eq(s.byCrop[0].share > 0, true);
+    ok((await Tw.book(admin.membership!.org_id)).length === 0, 'Kitovu’s own book is separate');
+    ok((await Tw.book(null)).some((x) => x.loan_no === loanNo), 'Kitovu sees all lenders');
+    const sites = await Tw.collateralSites(b); ok(sites.length >= 1 && sites[0].kg > 0);
+    const ck = await Tw.checklist(accionId);
+    ok(ck.items.find((i: any) => i.text.includes('disbursement'))?.done, JSON.stringify(ck.items));
+    ok(!ck.items.find((i: any) => i.text.toLowerCase().includes('repayment'))?.done);
+    const csv = await Tw.loanBookCsv(officer); ok(csv.includes(loanNo) && csv.includes(liveNo));
+    await rejects(Tw.loanBookCsv(gateClerk));
+  });
   await t('repayment closes the loan and releases the receipts with their history intact', async () => {
     const ln = (await F.loanView(officer, loanNo))!;
     ok(ln.pos!.outstanding > ln.principal, 'fee added');
@@ -978,7 +997,8 @@ async function main() {
     const officer = await makeUser(accionAdmin, 'officer2@accion.test', accionId, 'credit_officer');
     await req('POST', '/login', { email: 'officer2@accion.test', password: officer.password });
     await req('POST', '/login/2fa', { code: totpCode(officer.secret) });
-    eq((await req('GET', '/app')).status, 200);
+    eq((await req('GET', '/app')).location, '/tower');
+    eq((await req('GET', '/loans/ncr.csv')).status, 200, 'download sends once');
     eq((await req('GET', '/admin/orgs')).status, 403);
     eq((await req('GET', '/admin/people')).status, 403);
   });
@@ -1040,6 +1060,14 @@ async function main() {
     const lp = await req('GET', '/'); eq(lp.status, 200); ok(lp.text.includes('Lend against grain you can check') && lp.text.includes('/apply'));
     const sm = await req('GET', '/sample-receipt'); eq(sm.status, 200); ok(sm.text.includes('not a real receipt'));
     await signInAs(ops); eq((await req('GET', '/')).location, '/app'); delete jar.sx_sid;
+  });
+  await t('lenders land in their control tower; the loan book downloads', async () => {
+    await signInAs(officer);
+    eq((await req('GET', '/app')).location, '/tower');
+    const pg = await req('GET', '/tower'); eq(pg.status, 200); ok(pg.text.includes('Where the stock is') && pg.text.includes('Loan book'), pg.text.slice(0, 300));
+    const dl = await req('GET', '/tower/loan-book.csv'); eq(dl.status, 200); ok(dl.text.split('\n')[0].includes('loan_no'), dl.text.slice(0, 200));
+    delete jar.sx_sid;
+    await signInAs(gateClerk); eq((await req('GET', '/tower')).status, 403); delete jar.sx_sid;
   });
   await t('Receipt Passport and signing key are public', async () => {
     const r = (await Rc.receiptByNo(admin, rno))!;

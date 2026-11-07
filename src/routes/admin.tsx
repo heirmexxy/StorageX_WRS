@@ -8,6 +8,7 @@ import { HomePage, PeoplePage, OrgsPage, AuditPage, AccountPage } from '../views
 import type { OrgKind } from '../lib/rbac';
 
 import { UserError } from '../lib/errors';
+import { can } from '../lib/rbac';
 
 /** Runs an admin action; AuthErrors become a message on the page the person came from. */
 export async function act(c: Ctx, fallback: string, fn: () => Promise<string | void>) {
@@ -21,6 +22,8 @@ export async function act(c: Ctx, fallback: string, fn: () => Promise<string | v
 }
 
 get('/app', 'auth', async (c) => {
+  // Lenders start in their control tower.
+  if (c.membership?.org_kind === 'lender' && can(c.membership, 'finance.view')) return c.redirect('/tower');
   const counts = await db.get<Record<string, number>>(`SELECT
     (SELECT count(*)::int FROM farmers WHERE status='active') AS farmers,
     (SELECT count(*)::int FROM warehouses) AS warehouses,
