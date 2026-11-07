@@ -18,6 +18,8 @@ import { sentForTests } from '../src/lib/sms';
 import * as R from '../src/lib/registry';
 import * as K from '../src/lib/kyc';
 import * as P from '../src/lib/applications';
+import * as S from '../src/lib/settings';
+import { screenSubmission, flagOf, parseFindings, latestCheck, type ModelCall } from '../src/lib/agents/kyc-screen';
 
 let pass = 0, fail = 0;
 async function t(name: string, fn: () => unknown | Promise<unknown>) {
@@ -326,6 +328,77 @@ async function main() {
     await rejects(R.verifyPolicy(ops, p.id));
     await R.verifyPolicy(admin, p.id);
     eq((await R.policiesFor(whid!))[0].status, 'active');
+  });
+
+  console.log('\nPhone check options and AI pre-check');
+  await t('settings: only super admins; a required check keeps at least one method', async () => {
+    await rejects(S.saveSettings(ops, { 'phone_check.sms': '0' }));
+    await rejects(S.saveSettings(admin, { 'phone_check.sms': '0', 'phone_check.voice': '0', 'phone_check.attested': '0' }));
+    eq(await S.saveSettings(admin, { 'phone_check.sms': '0' }), 1);
+    ok(await db.val(`SELECT 1 FROM audit_log WHERE action='settings.changed'`));
+  });
+  let vf = '';
+  await t('voice-call code works when text messages are switched off', async () => {
+    vf = await R.createFarmer(ops, { full_name: 'Voice Farmer', phone: '08012340000' });
+    await rejects(K.sendPhoneCode(ops, vf, 'sms'));
+    await K.sendPhoneCode(ops, vf, 'voice');
+    eq(sentForTests.at(-1)!.channel, 'voice');
+    await K.confirmPhone(ops, vf, lastCode()!);
+    eq((await R.farmerByCode(ops, vf))!.phone_check_method, 'voice');
+    await S.saveSettings(admin, { 'phone_check.sms': '1' });
+  });
+  let nf = '';
+  await t('no phone: a witnessed attestation lets the ID check go ahead; consent then needs paper', async () => {
+    nf = await R.createFarmer(ops, { full_name: 'Bala Nophone', state_code: 'KN' });
+    await rejects(K.submitLevel1(ops, nf, { id_type: 'nin', id_number: '22233344455' }, { id_doc: jpeg(7), selfie: jpeg(8) }));
+    await rejects(K.attestPresence(ops, nf, { witness_name: 'Alhaji Musa Kano', witness_role: 'Coop chairman', witness_phone: '08077001100', reason: 'no_phone' }));   // no declaration
+    await rejects(K.attestPresence(ops, nf, { witness_name: 'Musa', witness_role: 'Coop chairman', witness_phone: '08077001100', reason: 'no_phone', declare: '1' }));
+    await K.attestPresence(ops, nf, { witness_name: 'Alhaji Musa Kano', witness_role: 'Coop chairman', witness_phone: '08077001100', reason: 'no_phone', declare: '1' });
+    const id = await K.submitLevel1(ops, nf, { id_type: 'nin', id_number: '22233344455' }, { id_doc: jpeg(7), selfie: jpeg(8) });
+    eq(await db.val('SELECT phone_check_method FROM kyc_submissions WHERE id=$1', id), 'attested');
+    await rejects(K.sendConsentCode(ops, nf, accionId));
+    await S.saveSettings(admin, { 'phone_check.attested': '0' });
+    eq((await K.phoneMethods()).attested, false);
+    await S.saveSettings(admin, { 'phone_check.attested': '1' });
+  });
+  await t('phone check can be made optional', async () => {
+    await S.saveSettings(admin, { 'phone_check.required': '0' });
+    const f = await R.createFarmer(ops, { full_name: 'Optional Check', phone: '08012349999' });
+    ok(await K.submitLevel1(ops, f, { id_type: 'nin', id_number: '33344455566' }, { id_doc: jpeg(9), selfie: jpeg(10) }));
+    await S.saveSettings(admin, { 'phone_check.required': '1' });
+  });
+  const good = { document: { type_seen: 'nin_slip', legible: true, name_on_document: 'DANLADI Aisha', name_match: 'exact', last4_seen: '4455', year_of_birth_seen: null, expiry_date: null, original_capture: 'yes', original_note: '' }, face_photo: { one_clear_face: true, live_capture: 'yes', quality_note: 'clear' }, concerns: [], suggested_reject_reason: null };
+  const rec = { full_name: 'Aisha Danladi', id_type: 'nin', id_last4: '4455', year_of_birth: 1984, state_name: 'Taraba' };
+  await t('AI flag is computed from findings, not chosen by the model', () => {
+    eq(flagOf(parseFindings(JSON.stringify(good)), rec).flag, 'green');
+    eq(flagOf(parseFindings('Here you go: ' + JSON.stringify({ ...good, document: { ...good.document, last4_seen: '9999' } })), rec).flag, 'red');
+    eq(flagOf(parseFindings(JSON.stringify({ ...good, document: { ...good.document, original_capture: 'unsure' } })), rec).flag, 'amber');
+    eq(flagOf(parseFindings(JSON.stringify({ ...good, document: { ...good.document, type_seen: 'voters_card' } })), rec).flag, 'red');
+    eq(flagOf(parseFindings(JSON.stringify({ ...good, document: { ...good.document, expiry_date: '2020-01-01' } })), rec).flag, 'red');
+    eq(flagOf(parseFindings(JSON.stringify({ ...good, document: { ...good.document, name_on_document: 'Peter Obi', name_match: 'exact' } })), rec).flag, 'amber', 'cross-checks the model');
+    eq(parseFindings(JSON.stringify({ ...good, document: { ...good.document, last4_seen: '222 333 44455' } })).document.last4_seen, '4455', 'never keeps more than 4');
+  });
+  await t('AI pre-check stores findings, sees both photos, and reviewer agreement is tracked', async () => {
+    const id = await db.val<string>(`SELECT k.id FROM kyc_submissions k JOIN farmers f ON f.id=k.farmer_id WHERE f.code=$1`, nf);
+    let images = 0;
+    const fake: ModelCall = async (_s, content: any[]) => { images = content.filter((x) => x.type === 'image').length; return { text: JSON.stringify({ ...good, document: { ...good.document, name_on_document: 'Bala Nophone' } }), tin: 1000, tout: 200 }; };
+    eq(await screenSubmission(id!, fake), 'green'); eq(images, 2);
+    const chk = await latestCheck(id!); eq(chk?.flag, 'green');
+    await K.review(compliance, id!, 'approve', { checks: ['name_matches', 'face_matches', 'id_original'] });
+    eq(await db.val('SELECT reviewer_agreed_with_ai FROM kyc_submissions WHERE id=$1', id), true);
+  });
+  await t('AI failures and a missing key never block the human review', async () => {
+    const f = await R.createFarmer(ops, { full_name: 'Junk Answer', phone: '08012348888' });
+    await K.sendPhoneCode(ops, f); await K.confirmPhone(ops, f, lastCode()!);
+    const id = await K.submitLevel1(ops, f, { id_type: 'nin', id_number: '44455566677' }, { id_doc: jpeg(11), selfie: jpeg(12) });
+    eq(await screenSubmission(id, async () => ({ text: 'I cannot help with that', tin: 1, tout: 1 })), null);
+    eq((await latestCheck(id))?.status, 'failed');
+    eq(await screenSubmission(id, null), null);
+    eq((await latestCheck(id))?.status, 'skipped');
+    await S.saveSettings(admin, { 'kyc.ai_mode': 'off' });
+    eq(await screenSubmission(id, async () => { throw new Error('should not be called'); }), null);
+    await S.saveSettings(admin, { 'kyc.ai_mode': 'assist' });
+    ok((await K.reviewQueue(compliance)).some((r) => r.id === id), 'still in the human queue');
   });
 
   console.log('\nPartner applications');

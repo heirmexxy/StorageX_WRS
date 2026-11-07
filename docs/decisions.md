@@ -2,6 +2,14 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-07 (Build 2.1)
+
+1. **An AI agent pre-checks every ID submission; a person still decides.** It reads the ID photo, the face photo and the record and reports: document type, legibility, name on the ID and whether it matches, the last 4 characters it can read, expiry, and signs of a copy, a screen or a non-live face photo. The green/amber/red flag is computed in code from those findings, not chosen by the model. It never writes out a full ID number (the code also keeps only 4 characters) and does not compare faces or identify anyone. Reasons it does not decide on its own: face matching from two phone photos needs a licensed liveness and face-match service, lenders will ask who approved each identity, and the NDPA gives people the right to human review of automated decisions that affect them significantly. Each human decision records whether it agreed with the flag, so its accuracy is measured. Auto-approval of green cases becomes possible once a paid provider adds NIN lookup and face match, with a random sample still reviewed by a person.
+2. **Photos go to Anthropic's API for the pre-check.** It can be switched off in Settings or by `KYC_AI_MODE=off`. The farmer privacy notice must say so before the pilot.
+3. **The phone check stays, but it never excludes a farmer.** The phone is where receipt, sale and payment messages and consent codes go; without a check an agent can register farmers on his own number. Methods are text code, voice-call code (any phone; low literacy) and, for farmers with no working phone or signal, an in-person attestation by the field partner and a named local witness whose phone Kitovu can call. Whether the step is required and which methods are on are switches in **Settings**, stored in the database and audited. Farmers without a confirmed phone give consent on paper.
+4. **Text codes use Termii's DND route by default**, because the generic route does not reach numbers on the Do-Not-Disturb list.
+5. **A phone on more than two farmer records is flagged to the reviewer.**
+
 ## 2026-11-07 (Build 2)
 
 1. **Identity checks are tiered and work without a paid provider.** Level 0 is registered. Level 1 needs the farmer's phone confirmed by SMS code, a photo of an ID and a face photo, approved by a second Kitovu person (the database refuses a reviewer who is the submitter). Level 2 is a lender confirming it opened an account, which means its own BVN/NIN checks are done. A paid NIN lookup (Smile ID, Dojah or Youverify) plugs into `src/lib/kyc.ts` later and only adds a result to the review.

@@ -6,7 +6,7 @@ Each build ends with a check that proves it works. Gates are joint reviews with 
 | --- | --- | --- | --- |
 | 0 | Schema, reference data, legacy import | Legacy farmers, agents, warehouses and receipt migrated to the standard | Done (Nov 2026) |
 | 1 | Foundations: sign-in, mandatory two-step codes, organisation roles, audit log, money, tests, deploy and backups | Staff sign in with 2FA, roles are enforced, a deploy runs, a backup restores | Done (Nov 2026) |
-| 2 | Registry: farmers, field partners, warehouses; tiered identity checks (maker-checker, provider slot); consent; lender level-2 confirmation; legacy review queue; public partner applications; SMS second step for low-risk roles | Field teams re-verify migrated farmers and register new ones | Done (Nov 2026) |
+| 2 | Registry: farmers, field partners, warehouses; tiered identity checks (maker-checker, provider slot); consent; lender level-2 confirmation; legacy review queue; public partner applications; SMS second step for low-risk roles; AI pre-check of ID photos; voice-call and witnessed alternatives to SMS, switchable in Settings | Field teams re-verify migrated farmers and register new ones | Done (Nov 2026) |
 | 3 | Offline intake app (Android) with evidence pack | A delivery with no network becomes a synced intake record | Next |
 | 4 | Receipt ledger, Receipt Passport (signed QR, verify page, PDF) | A scanned receipt shows its true status; history cannot be edited | |
 | 5 | Stock control: stacks, movements, counts, reconciliation | Physical counts reconcile to receipts | |

@@ -89,6 +89,7 @@ export function FarmerNewPage({ c, states, crops, error, values, duplicate }: { 
 export interface FarmerView {
   f: Farmer; states: Opt[]; crops: Opt[]; subs: Submission[]; consents: any[]; verifs: any[]; issues: Issue[]; lenders: { id: string; name: string }[];
   codeSent?: 'phone' | 'consent'; consentLender?: string;
+  pm: { required: boolean; sms: boolean; voice: boolean; attested: boolean };
 }
 
 export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
@@ -97,6 +98,7 @@ export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
   const pending = v.subs.find((s) => s.status === 'pending');
   const lender = c.membership?.org_kind === 'lender';
   const myVerif = v.verifs.find((x) => x.customer_ref && !x.revoked_at);
+  const phoneDone = !!f.phone_verified_at || (f.phone_check_method === 'attested' && v.pm.attested);
   return (
     <Page c={c} title={f.full_name}>
       <div className="head">
@@ -128,25 +130,48 @@ export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
         <section className="card">
           <h2>Identity check</h2>
           <ol className="steps">
-            <li className={f.phone_verified_at ? 'done' : ''}>
-              <b>Phone confirmed</b> {f.phone_verified_at ? <small>{fmtDate(f.phone_verified_at)}</small> : null}
+            <li className={phoneDone ? 'done' : ''}>
+              <b>{f.phone_check_method === 'attested' && !f.phone_verified_at ? 'Presence witnessed (no phone check)' : 'Phone confirmed'}</b>{' '}
+              {f.phone_verified_at ? <small>{`${f.phone_check_method === 'voice' ? 'by voice call' : 'by text'} · ${fmtDate(f.phone_verified_at)}`}</small>
+                : f.phone_check_method === 'attested' ? <small>{`witness: ${f.phone_attestation?.witness_name}, ${f.phone_attestation?.witness_role} · recorded by ${f.phone_attestation?.by_name}`}</small>
+                : !v.pm.required ? <small>optional</small> : null}
               {edit && !f.phone_verified_at && f.kyc_level === 0 && (
-                f.phone_e164 ? (
-                  <div>
-                    <form method="post" action={`/farmers/${f.code}/phone/send`} className="inline"><Csrf c={c} /><button>{v.codeSent === 'phone' ? 'Send again' : 'Text a code to the farmer'}</button></form>
-                    {v.codeSent === 'phone' && (
-                      <form method="post" action={`/farmers/${f.code}/phone/confirm`} className="row">
-                        <Csrf c={c} /><input name="otp" inputMode="numeric" placeholder="6-digit code" aria-label="Code the farmer received" required /><button className="primary">Confirm</button>
+                <div>
+                  {f.phone_e164 && (v.pm.sms || v.pm.voice) && (
+                    <form method="post" action={`/farmers/${f.code}/phone/send`} className="row">
+                      <Csrf c={c} />
+                      {v.pm.sms && <button name="channel" value="sms" className={v.codeSent === 'phone' ? '' : 'primary'}>Text a code</button>}
+                      {v.pm.voice && <button name="channel" value="voice">Call with a code</button>}
+                      <small className="muted">The call reads the code aloud: use it for basic phones or if the farmer does not read texts.</small>
+                    </form>
+                  )}
+                  {v.codeSent === 'phone' && (
+                    <form method="post" action={`/farmers/${f.code}/phone/confirm`} className="row">
+                      <Csrf c={c} /><input name="otp" inputMode="numeric" placeholder="6-digit code" aria-label="Code the farmer received" required /><button className="primary">Confirm</button>
+                    </form>
+                  )}
+                  {!f.phone_e164 && <p className="muted">No phone on the record.</p>}
+                  {v.pm.attested && f.phone_check_method !== 'attested' && (
+                    <details className="attest" open={!f.phone_e164}>
+                      <summary>No working phone or no signal? Record a witnessed attestation</summary>
+                      <form method="post" action={`/farmers/${f.code}/attest`} className="grid">
+                        <Csrf c={c} />
+                        <Select label="Why no code" name="reason" blank="Choose…" required options={[['no_phone', 'Farmer has no phone'], ['no_signal', 'No network here'], ['code_not_received', 'Code did not arrive'], ['shared_phone', 'Phone belongs to someone else']]} />
+                        <Field label="Witness full name" name="witness_name" required hint="Someone local who knows the farmer" />
+                        <Field label="Witness role" name="witness_role" required hint="e.g. cooperative chairman, village head" />
+                        <Field label="Witness phone" name="witness_phone" type="tel" required hint="Kitovu may call to confirm" />
+                        <label className="check"><input type="checkbox" name="declare" value="1" required /> I met this farmer in person with the witness, who confirmed who they are</label>
+                        <button>Record attestation</button>
                       </form>
-                    )}
-                  </div>
-                ) : <p className="muted">Add a phone number first.</p>
+                    </details>
+                  )}
+                </div>
               )}
             </li>
             <li className={f.kyc_level >= 1 ? 'done' : pending ? 'wait' : ''}>
               <b>ID and photo checked by Kitovu</b>{' '}
               {f.kyc_level >= 1 ? <small>{ID_TYPES[f.id_type!]?.label} ending {f.id_last4}</small> : pending ? <small>{`waiting for review since ${fmtDate(pending.submitted_at)}`}</small> : null}
-              {edit && f.kyc_level === 0 && f.phone_verified_at && !pending && (
+              {edit && f.kyc_level === 0 && (phoneDone || !v.pm.required) && !pending && (
                 <form method="post" action={`/farmers/${f.code}/kyc`} encType="multipart/form-data" className="kyc">
                   <Csrf c={c} />
                   <Select label="ID type" name="id_type" blank="Choose…" required options={Object.entries(ID_TYPES).map(([k, t]) => [k, t.label])} />
@@ -199,19 +224,20 @@ export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
               ))}</tbody>
             </table>
           )}
-          {edit && f.phone_verified_at && v.lenders.length > 0 && (
+          {edit && v.lenders.length > 0 && (
             <div className="consent">
-              <form method="post" action={`/farmers/${f.code}/consent/send`} className="row">
+              {f.phone_verified_at && (v.pm.sms || v.pm.voice) ? <form method="post" action={`/farmers/${f.code}/consent/send`} className="row">
                 <Csrf c={c} />
                 <select name="org_id" defaultValue={v.consentLender ?? ''} aria-label="Lender" required><option value="">Choose lender…</option>{v.lenders.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select>
-                <button>Text the farmer a consent code</button>
-              </form>
+                {v.pm.sms && <button name="channel" value="sms">Text a consent code</button>}
+                {v.pm.voice && <button name="channel" value="voice">Call with a consent code</button>}
+              </form> : <p className="muted">No confirmed phone: record consent on the signed or thumb-printed paper form.</p>}
               {v.consentLender && <blockquote>{CONSENT_TEXT(v.lenders.find((l) => l.id === v.consentLender)?.name ?? 'the lender')}</blockquote>}
               <form method="post" action={`/farmers/${f.code}/consent`} encType="multipart/form-data" className="grid">
                 <Csrf c={c} />
                 <Select label="Lender" name="org_id" value={v.consentLender} blank="Choose…" required options={v.lenders.map((l) => [l.id, l.name])} />
-                <Select label="How the farmer agreed" name="method" value={v.consentLender ? 'sms_code' : 'paper_form'} options={[['sms_code', 'Gave the SMS code'], ['paper_form', 'Signed or thumb-printed the paper form']]} />
-                <Field label="SMS code (if by code)" name="otp" inputMode="numeric" />
+                <Select label="How the farmer agreed" name="method" value={v.consentLender ? 'sms_code' : 'paper_form'} options={f.phone_verified_at ? [['sms_code', 'Gave the code (text or call)'], ['paper_form', 'Signed or thumb-printed the paper form']] : [['paper_form', 'Signed or thumb-printed the paper form']]} />
+                {f.phone_verified_at && <Field label="Code (if by code)" name="otp" inputMode="numeric" />}
                 <Field label="Photo of the form (if on paper)" name="evidence" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" capture="environment" />
                 <label className="check"><input type="checkbox" name="read_aloud" value="1" required /> I read the statement to the farmer and they agreed</label>
                 <button className="primary">Record consent</button>
@@ -236,7 +262,7 @@ export function KycReviewPage({ c, rows }: { c: Ctx; rows: Submission[] }) {
   return (
     <Page c={c} title="ID checks">
       <h1>Identity checks to review</h1>
-      <p className="muted">Compare the ID photo, the face photo and the record. You cannot review a check you submitted. ID photos are deleted automatically after the retention period; the decision stays.</p>
+      <p className="muted">Compare the ID photo, the face photo and the record. An AI pre-check reads the photos first and flags problems; you make the decision. You cannot review a check you submitted. ID photos are deleted automatically after the retention period; the decision stays.</p>
       {!rows.length && <section className="card"><p>Nothing waiting. Well done.</p></section>}
       {rows.map((k) => (
         <section className="card review" key={k.id}>
@@ -249,10 +275,13 @@ export function KycReviewPage({ c, rows }: { c: Ctx; rows: Submission[] }) {
             <dl className="facts">
               <dt>Place</dt><dd>{[k.community, k.state_name].filter(Boolean).join(', ') || '—'}</dd>
               <dt>Born</dt><dd>{k.year_of_birth ?? '—'}</dd>
-              <dt>Phone</dt><dd>{k.phone_e164 ? `${mask(k.phone_e164)} · confirmed by SMS` : '—'}</dd>
+              <dt>Phone</dt><dd>{k.phone_e164 ? mask(k.phone_e164) : 'none'}{' · '}{k.phone_check_method === 'sms' ? 'confirmed by text' : k.phone_check_method === 'voice' ? 'confirmed by voice call' : k.phone_check_method === 'attested' ? `not checked; witnessed by ${k.phone_attestation?.witness_name} (${k.phone_attestation?.witness_role}, ${k.phone_attestation?.witness_phone})` : 'not checked'}
+                {k.records_on_phone > 2 && <> <span className="badge warn">{`on ${k.records_on_phone} farmer records`}</span></>}</dd>
               <dt>Submitted</dt><dd>{fmtDate(k.submitted_at)} by {k.submitted_by_name}</dd>
               {k.provider_result && <><dt>Lookup</dt><dd>{String(k.provider_result.match)}</dd></>}
             </dl>
+            <AiPanel k={k} />
+            <form method="post" action={`/kyc/${k.id}/ai-recheck`}><Csrf c={c} /><button className="link small">{k.ai ? 'Run the AI pre-check again' : 'Run the AI pre-check'}</button></form>
             {k.submitted_by === c.user?.id ? <p className="flash info">You submitted this, so a colleague must review it.</p> : (
               <>
                 <form method="post" action={`/kyc/${k.id}/approve`}>
@@ -265,7 +294,7 @@ export function KycReviewPage({ c, rows }: { c: Ctx; rows: Submission[] }) {
                 </form>
                 <form method="post" action={`/kyc/${k.id}/reject`} className="row">
                   <Csrf c={c} />
-                  <select name="reason" aria-label="Reason" required defaultValue=""><option value="">Reject because…</option>{Object.entries(REJECT_REASONS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+                  <select name="reason" aria-label="Reason" required defaultValue={k.ai?.result?.suggested_reject_reason ?? ''}><option value="">Reject because…</option>{Object.entries(REJECT_REASONS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
                   <input name="note" placeholder="Note to the field partner" aria-label="Note" />
                   <button className="danger">Reject</button>
                 </form>
@@ -275,6 +304,30 @@ export function KycReviewPage({ c, rows }: { c: Ctx; rows: Submission[] }) {
         </section>
       ))}
     </Page>
+  );
+}
+
+function AiPanel({ k }: { k: Submission }) {
+  const a = k.ai;
+  if (!a) return null;
+  if (a.status !== 'done') return <p className="muted small">{`AI pre-check ${a.status}${a.error ? `: ${a.error}` : ''}. Review as usual.`}</p>;
+  const r = a.result, d = r.document;
+  const label = { green: 'Nothing found', amber: 'Look closely', red: 'Likely problem' }[a.flag as 'green'];
+  return (
+    <div className={`ai ${a.flag}`}>
+      <p><b>{`AI pre-check: ${label}`}</b> <small className="muted">{`${a.model} · advisory only; you decide`}</small></p>
+      {r.reasons?.length > 0 && <ul>{r.reasons.map((x: string) => <li key={x}>{x}</li>)}</ul>}
+      <dl className="facts small">
+        <dt>Document seen</dt><dd>{d.type_seen.replace(/_/g, ' ')}{d.legible ? '' : ' (not legible)'}</dd>
+        <dt>Name on ID</dt><dd>{d.name_on_document ?? '—'} ({d.name_match})</dd>
+        <dt>Last 4 seen</dt><dd>{d.last4_seen ?? '—'}</dd>
+        {d.expiry_date && <><dt>Expires</dt><dd>{d.expiry_date}</dd></>}
+        <dt>ID photo</dt><dd>{`original: ${d.original_capture}`}{d.original_note ? ` · ${d.original_note}` : ''}</dd>
+        <dt>Face photo</dt><dd>{`${r.face_photo.one_clear_face ? 'one clear face' : 'no single clear face'} · live: ${r.face_photo.live_capture}`}{r.face_photo.quality_note ? ` · ${r.face_photo.quality_note}` : ''}</dd>
+      </dl>
+      {r.concerns?.length > 0 && <p className="small">{r.concerns.join(' · ')}</p>}
+      <p className="muted small">The AI does not compare the faces. That check is yours.</p>
+    </div>
   );
 }
 

@@ -49,12 +49,13 @@ Farmer phone checks, consent codes and SMS sign-in codes need Termii. Until this
    ```bash
    sudo nano /srv/storagex/.env
    ```
-   Set `TERMII_API_KEY=` and `TERMII_SENDER_ID=`, save (Ctrl+O, Enter, Ctrl+X).
+   Set `TERMII_API_KEY=` and `TERMII_SENDER_ID=`. Leave `TERMII_CHANNEL=dnd` (it reaches numbers on the Do-Not-Disturb list). Save (Ctrl+O, Enter, Ctrl+X).
 3. Restart:
    ```bash
    sudo systemctl restart storagex
    ```
-4. Register a test farmer with your own phone and press **Text a code to the farmer**. The code should arrive within a minute.
+4. Register a test farmer with your own phone and press **Text a code**, then **Call with a code**. Both should reach you within a minute. If the call fails, ask Termii support for the Voice Call endpoint and put it in `TERMII_VOICE_PATH`.
+5. Which methods are allowed is set in the app: **Settings → Farmer phone check**.
 
 ## Step 9 — Keep a copy of the settings file somewhere safe
 ID photos are encrypted with a key made from `APP_SECRET` in `/srv/storagex/.env`. If that file is lost, the photos in the backups cannot be opened.
@@ -63,3 +64,9 @@ ID photos are encrypted with a key made from `APP_SECRET` in `/srv/storagex/.env
 sudo cat /srv/storagex/.env
 ```
 Copy the `APP_SECRET=` line into your password manager. Do not put it in Google Drive next to the backups.
+
+## Step 10 — Turn on the AI pre-check of ID photos (optional)
+1. In the Anthropic Console, create an API key (the same account as ComboTrader is fine).
+2. On the server, `sudo nano /srv/storagex/.env` and set `ANTHROPIC_API_KEY=`. Save.
+3. `sudo systemctl restart storagex`
+4. In the app, **Settings → AI pre-check** should no longer say the key is missing. Submit a test ID check and open **ID checks**: the coloured AI panel appears within about a minute.

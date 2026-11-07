@@ -18,6 +18,7 @@ const NAV: { href: string; label: string; perm?: Permission; kitovu?: boolean }[
   { href: '/admin/people', label: 'People', perm: 'users.manage' },
   { href: '/admin/orgs', label: 'Organisations', perm: 'orgs.manage' },
   { href: '/admin/audit', label: 'Audit log', perm: 'audit.view' },
+  { href: '/admin/settings', label: 'Settings', perm: 'settings.manage' },
   { href: '/account', label: 'My account' },
 ];
 

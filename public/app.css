@@ -96,3 +96,10 @@ body.bare.wide main { max-width: 720px; margin-top: 4vh; }
 input[type=checkbox], input[type=radio] { padding: 0; width: 16px; height: 16px; flex: none; accent-color: var(--brand); }
 .top nav { gap: 14px; flex-wrap: wrap; font-size: 14px; }
 .pics img { min-height: 220px; }
+.ai { border: 1px solid var(--line); border-left-width: 4px; border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
+.ai ul { margin: 4px 0 8px; padding-left: 20px; }
+.ai.green { border-left-color: var(--ok); }
+.ai.amber { border-left-color: var(--warn); background: #fffbef; }
+.ai.red { border-left-color: var(--bad); background: #fdf3f2; }
+.attest { margin-top: 10px; }
+.attest summary { font-size: 14px; }

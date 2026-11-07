@@ -13,6 +13,10 @@ import { FarmersPage, FarmerNewPage, FarmerPage, KycReviewPage, ReviewQueuePage,
 import { ApplyPage, ApplyThanksPage, ApplicationsPage } from '../views/apply';
 import { act } from './admin';
 import { can } from '../lib/rbac';
+import { screenSubmission } from '../lib/agents/kyc-screen';
+import * as S from '../lib/settings';
+import { config } from '../lib/config';
+import { SettingsPage } from '../views/settings';
 
 const farmerBody = (c: Ctx) => ({ ...c.body, commodities: c.multi.commodities ?? [] });
 
@@ -38,7 +42,7 @@ async function farmerView(c: Ctx, extra: Partial<FarmerView> = {}) {
   if (!f) throw new HttpError(404, 'No farmer with that code, or you cannot see them.');
   const kit = c.membership?.org_kind === 'kitovu';
   const v: FarmerView = {
-    f, states: await R.states(), crops: await R.commodities(), lenders: await K.lenders(),
+    f, states: await R.states(), crops: await R.commodities(), lenders: await K.lenders(), pm: await K.phoneMethods(),
     subs: kit || c.membership?.org_kind !== 'lender' ? await K.submissionsFor(f.id) : [],
     consents: c.membership?.org_kind === 'lender' ? [] : await K.consentsFor(f.id),
     verifs: await K.verificationsFor(c.actor, f.id),
@@ -65,12 +69,15 @@ async function onFarmer(c: Ctx, fn: () => Promise<Partial<FarmerView> | void>, o
 }
 
 post('/farmers/:code', 'perm:farmers.edit', (c) => onFarmer(c, async () => { await R.updateFarmer(c.actor, c.params.code, farmerBody(c)); }, 'Saved.'));
-post('/farmers/:code/phone/send', 'perm:farmers.edit', (c) => onFarmer(c, async () => { await K.sendPhoneCode(c.actor, c.params.code); return { codeSent: 'phone' }; }, 'Code sent. Ask the farmer to read it out.'));
+post('/farmers/:code/phone/send', 'perm:farmers.edit', (c) => onFarmer(c, async () => { await K.sendPhoneCode(c.actor, c.params.code, c.body.channel === 'voice' ? 'voice' : 'sms'); return { codeSent: 'phone' }; }, c.body.channel === 'voice' ? 'Calling the farmer now. Ask them to tell you the code they hear.' : 'Code sent. Ask the farmer to read it out.'));
+post('/farmers/:code/attest', 'perm:farmers.edit', (c) => onFarmer(c, async () => { await K.attestPresence(c.actor, c.params.code, c.body); }, 'Attestation recorded. Kitovu may call the witness to confirm.'));
 post('/farmers/:code/phone/confirm', 'perm:farmers.edit', (c) => onFarmer(c, async () => { await K.confirmPhone(c.actor, c.params.code, c.body.otp); }, 'Phone confirmed.'));
 post('/farmers/:code/kyc', 'perm:farmers.edit', (c) => onFarmer(c, async () => {
-  await K.submitLevel1(c.actor, c.params.code, c.body, { id_doc: c.files.id_doc, selfie: c.files.selfie });
+  const id = await K.submitLevel1(c.actor, c.params.code, c.body, { id_doc: c.files.id_doc, selfie: c.files.selfie });
+  // The AI pre-check runs after the response; the reviewer sees its findings when they open the queue.
+  void screenSubmission(id).catch((e) => console.error('[kyc-screen]', e));
 }, 'Sent for review. A Kitovu compliance officer will check it.'));
-post('/farmers/:code/consent/send', 'perm:farmers.edit', (c) => onFarmer(c, async () => { await K.sendConsentCode(c.actor, c.params.code, c.body.org_id); return { consentLender: c.body.org_id }; }, 'Consent code sent. Read the statement to the farmer, then enter the code they received.'));
+post('/farmers/:code/consent/send', 'perm:farmers.edit', (c) => onFarmer(c, async () => { await K.sendConsentCode(c.actor, c.params.code, c.body.org_id, c.body.channel === 'voice' ? 'voice' : 'sms'); return { consentLender: c.body.org_id }; }, 'Consent code sent. Read the statement to the farmer, then enter the code they received.'));
 post('/farmers/:code/consent', 'perm:farmers.edit', (c) => onFarmer(c, async () => { await K.recordConsent(c.actor, c.params.code, c.body, c.files.evidence); }, 'Consent recorded. The lender can now see this farmer.'));
 post('/farmers/:code/consent/:id/withdraw', 'perm:farmers.edit', (c) => onFarmer(c, async () => { await K.withdrawConsent(c.actor, c.params.id, c.body.reason); }, 'Consent withdrawn. The lender no longer sees this farmer.'));
 post('/farmers/:code/lender-verify', 'perm:farmers.verify_account', (c) => onFarmer(c, async () => { await K.lenderVerify(c.actor, c.params.code, c.body.customer_ref); }, 'Confirmed. The farmer is now level 2.'));
@@ -79,6 +86,7 @@ post('/farmers/:code/lender-revoke', 'perm:farmers.verify_account', (c) => onFar
 // ---------- identity review ----------
 get('/kyc/review', 'perm:kyc.review', async (c) => c.html(render(<KycReviewPage c={c} rows={await K.reviewQueue(c.actor)} />)));
 post('/kyc/:id/approve', 'perm:kyc.review', (c) => act(c, '/kyc/review', async () => { await K.review(c.actor, c.params.id, 'approve', { note: c.body.note, checks: c.multi.checks ?? [] }); return 'Approved. The farmer is now level 1.'; }));
+post('/kyc/:id/ai-recheck', 'perm:kyc.review', (c) => act(c, '/kyc/review', async () => { const f = await screenSubmission(c.params.id); return f ? `AI pre-check: ${f}.` : 'AI pre-check did not run (see the note on the item).'; }));
 post('/kyc/:id/reject', 'perm:kyc.review', (c) => act(c, '/kyc/review', async () => { await K.review(c.actor, c.params.id, 'reject', { reason: c.body.reason, note: c.body.note }); return 'Rejected. The field partner can submit again.'; }));
 
 // Decrypted files are served only to Kitovu roles that need them, and every opening is logged.
@@ -136,3 +144,16 @@ post('/admin/applications/:id/approve', 'perm:orgs.manage', async (c) => {
   catch (e) { if (!(e instanceof UserError)) throw e; c.back('/admin/applications', ['error', e.message]); }
 });
 post('/admin/applications/:id/reject', 'perm:orgs.manage', (c) => act(c, '/admin/applications', async () => { await P.rejectApplication(c.actor, c.params.id, c.body); return 'Application closed.'; }));
+
+// ---------- platform settings ----------
+get('/admin/settings', 'perm:settings.manage', async (c) => {
+  const stats = await db.get(`SELECT count(*) FILTER (WHERE reviewer_agreed_with_ai) AS agreed, count(*) FILTER (WHERE reviewer_agreed_with_ai = false) AS disagreed,
+    count(*) FILTER (WHERE ai_flag IS NOT NULL AND status IN ('approved','rejected')) AS screened FROM kyc_submissions`);
+  c.html(render(<SettingsPage c={c} s={await S.getSettings()} serverAiOff={config.kycAiMode === 'off'} hasKey={!!config.anthropicKey} stats={stats} />));
+});
+post('/admin/settings', 'perm:settings.manage', (c) => act(c, '/admin/settings', async () => {
+  const input: Record<string, unknown> = {};
+  for (const k of Object.keys(S.DEFAULTS)) input[k] = c.body[k] ?? (typeof (S.DEFAULTS as any)[k] === 'boolean' ? '0' : undefined);
+  const n = await S.saveSettings(c.actor, input);
+  return n ? `${n} setting(s) changed.` : 'Nothing changed.';
+}));

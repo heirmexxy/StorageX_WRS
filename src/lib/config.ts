@@ -22,6 +22,13 @@ export const config = {
   // SMS through Termii (the same account ComboTrader uses). Without a key, codes are only logged (never in production).
   termiiKey: env('TERMII_API_KEY'),
   termiiSender: env('TERMII_SENDER_ID', 'Kitovu'),
+  // 'dnd' reaches numbers on the Do-Not-Disturb list (most OTPs need it); 'generic' does not.
+  termiiChannel: env('TERMII_CHANNEL', 'dnd'),
+  termiiVoicePath: env('TERMII_VOICE_PATH', '/api/sms/otp/call'),
+  // AI pre-check of identity submissions. 'assist' = findings shown to the human reviewer; 'off' = none.
+  kycAiMode: env('KYC_AI_MODE', 'assist'),
+  anthropicKey: env('ANTHROPIC_API_KEY'),
+  aiModel: env('AI_MODEL', 'claude-sonnet-5-5'),
   // Optional paid identity lookup. 'none' = Kitovu's own maker-checker review only.
   kycProvider: env('KYC_PROVIDER', 'none'),
   // ID photos and selfies are deleted this many days after a review decision (the decision and hashes remain).

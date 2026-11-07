@@ -18,7 +18,7 @@ const isKitovu = (a: Actor) => a.membership?.org_kind === 'kitovu';
 export interface Farmer {
   id: string; code: string; full_name: string; phone_e164: string | null; sex: string | null; state_code: string | null; state_name: string | null;
   community: string | null; commodities: string[]; kyc_level: number; status: string; needs_review: boolean; source: string;
-  year_of_birth: number | null; phone_verified_at: Date | null; id_type: string | null; id_last4: string | null; created_at: Date; updated_at: Date;
+  year_of_birth: number | null; phone_verified_at: Date | null; phone_check_method: 'sms' | 'voice' | 'attested' | null; phone_attestation: any; id_type: string | null; id_last4: string | null; created_at: Date; updated_at: Date;
   registered_by_name?: string | null; open_issues?: number;
 }
 
@@ -35,7 +35,7 @@ function farmerScope(a: Actor): { where: string; arg: string | null } {
 }
 
 const FARMER_COLS = `f.id, f.code, f.full_name, f.phone_e164, f.sex, f.state_code, s.name AS state_name, f.community, f.commodities, f.kyc_level, f.status,
-  f.needs_review, f.source, f.year_of_birth, f.phone_verified_at, f.id_type, f.id_last4, f.created_at, f.updated_at`;
+  f.needs_review, f.source, f.year_of_birth, f.phone_verified_at, f.phone_check_method, f.phone_attestation, f.id_type, f.id_last4, f.created_at, f.updated_at`;
 
 export async function searchFarmers(a: Actor, q: { text?: string; state?: string; level?: string; review?: string; status?: string } = {}) {
   need(a, 'farmers.view');
@@ -140,7 +140,8 @@ export async function updateFarmer(a: Actor, code: string, i: FarmerInput) {
   await tx(async () => {
     // A new phone number must be confirmed again; an identity check already approved stays valid.
     await db.run(`UPDATE farmers SET full_name=$2, phone_e164=$3, sex=$4, state_code=$5, community=$6, commodities=$7, year_of_birth=$8, updated_at=now(),
-                  phone_verified_at = CASE WHEN phone_e164 IS DISTINCT FROM $3 THEN NULL ELSE phone_verified_at END WHERE id=$1`,
+                  phone_verified_at = CASE WHEN phone_e164 IS DISTINCT FROM $3 THEN NULL ELSE phone_verified_at END,
+                  phone_check_method = CASE WHEN phone_e164 IS DISTINCT FROM $3 AND phone_check_method <> 'attested' THEN NULL ELSE phone_check_method END WHERE id=$1`,
       f.id, v.full_name, v.phone_e164, v.sex, v.state_code, v.community, v.commodities, v.year_of_birth);
     await audit(actorOf(a), 'farmer.updated', { orgId: a.membership!.org_id, entity: 'farmer', entityId: f.id, data: { code: f.code, changed } });
   });

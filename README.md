@@ -19,7 +19,9 @@ Node 22 and TypeScript, server-rendered React, PostgreSQL 16, built with esbuild
 | `src/lib/registry.ts` | Farmers, field partners, warehouses, insurance, the data review queue |
 | `src/lib/kyc.ts` | Tiered identity checks, consent to share with lenders, lender confirmation, provider slot |
 | `src/lib/applications.ts` | Public partner applications and their review |
-| `src/lib/files.ts`, `otp.ts`, `sms.ts` | Encrypted uploads, one-time SMS codes, Termii |
+| `src/lib/files.ts`, `otp.ts`, `sms.ts` | Encrypted uploads, one-time codes, Termii text and voice |
+| `src/lib/settings.ts` | Settings changed from the admin screen (phone-check methods, AI pre-check) |
+| `src/lib/agents/kyc-screen.ts` | AI pre-check of identity photos (advisory; flag computed in code) |
 | `src/lib/money.ts` | Kobo parsing and formatting |
 | `src/lib/migrate.ts` | Migration runner (checksummed) and seeds |
 | `src/cli.ts` | `migrate`, `seed`, `make-admin`, `backup`, `restore-check`, `verify-audit`, `purge-files` |

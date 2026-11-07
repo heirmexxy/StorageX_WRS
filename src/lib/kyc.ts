@@ -13,7 +13,9 @@ import { UserError } from './errors';
 import { saveFile } from './files';
 import { issueOtp, checkOtp } from './otp';
 import { farmerByCode, NotAllowed, type Farmer } from './registry';
-import { hashIdNumber, clean } from './util';
+import { hashIdNumber, clean, normPhone } from './util';
+import { getSettings } from './settings';
+import { latestCheck } from './agents/kyc-screen';
 import type { Upload } from './http';
 
 export const ID_TYPES: Record<string, { label: string; re: RegExp; hint: string }> = {
@@ -34,14 +36,26 @@ const providers: Record<string, Provider> = {
 };
 export const provider = () => providers[config.kycProvider] ?? providers.none;
 
-// ---------- step 1: phone ----------
-export async function sendPhoneCode(a: Actor, code: string) {
+// ---------- step 1: phone (or witnessed presence) ----------
+// Why check the phone at all: it is where the farmer later gets receipt, sale and payment messages and where
+// consent codes go. Without a check, an agent can register farmers on his own number and every alert reaches
+// him instead. Which methods are on, and whether the step is required, are switches in Settings.
+export type PhoneMethod = 'sms' | 'voice' | 'attested';
+
+export async function phoneMethods() {
+  const s = await getSettings();
+  return { required: s['phone_check.required'], sms: s['phone_check.sms'], voice: s['phone_check.voice'], attested: s['phone_check.attested'] };
+}
+
+export async function sendPhoneCode(a: Actor, code: string, channel: 'sms' | 'voice' = 'sms') {
   if (!can(a.membership, 'farmers.edit')) throw new NotAllowed('Your role cannot run identity checks.');
   const f = await farmerByCode(a, code);
   if (!f) throw new UserError('Farmer not found.');
   if (!f.phone_e164) throw new UserError('Add the farmer’s phone number first.');
-  await issueOtp('farmer_phone', f.id, f.phone_e164, (c) => `StorageX: your code is ${c}. Give it only to the Kitovu field partner registering you. It expires in 10 minutes.`);
-  await audit(actorOf(a), 'farmer.phone_code_sent', { entity: 'farmer', entityId: f.id, data: { code: f.code } });
+  const m = await phoneMethods();
+  if (!m[channel]) throw new UserError(`${channel === 'sms' ? 'Text-message' : 'Voice-call'} codes are switched off. Ask a Kitovu administrator.`);
+  await issueOtp('farmer_phone', f.id, f.phone_e164, (c) => `StorageX: your code is ${c}. Give it only to the Kitovu field partner registering you. It expires in 10 minutes.`, channel);
+  await audit(actorOf(a), 'farmer.phone_code_sent', { entity: 'farmer', entityId: f.id, data: { code: f.code, channel } });
 }
 
 export async function confirmPhone(a: Actor, code: string, otp: string) {
@@ -51,9 +65,33 @@ export async function confirmPhone(a: Actor, code: string, otp: string) {
   const r = await checkOtp('farmer_phone', f.id, otp);
   if (!r.ok) throw new UserError(r.reason);
   if (r.phone !== f.phone_e164) throw new UserError('The phone number changed after the code was sent. Send a new code.');
-  await db.run('UPDATE farmers SET phone_verified_at=now(), updated_at=now() WHERE id=$1', f.id);
-  await audit(actorOf(a), 'farmer.phone_verified', { entity: 'farmer', entityId: f.id, data: { code: f.code } });
+  await db.run(`UPDATE farmers SET phone_verified_at=now(), phone_check_method=$2, phone_attestation=NULL, updated_at=now() WHERE id=$1`, f.id, r.channel);
+  await audit(actorOf(a), 'farmer.phone_verified', { entity: 'farmer', entityId: f.id, data: { code: f.code, channel: r.channel } });
 }
+
+/** For farmers with no working phone or no signal: the field partner and a named local witness vouch that they met the farmer. */
+export async function attestPresence(a: Actor, code: string, i: { witness_name?: string; witness_role?: string; witness_phone?: string; reason?: string; declare?: string }) {
+  if (!can(a.membership, 'farmers.edit')) throw new NotAllowed('Your role cannot run identity checks.');
+  if (!(await phoneMethods()).attested) throw new UserError('Witnessed attestation is switched off. Ask a Kitovu administrator.');
+  const f = await farmerByCode(a, code);
+  if (!f) throw new UserError('Farmer not found.');
+  if (f.phone_verified_at) throw new UserError('This farmer’s phone is already confirmed.');
+  const name = clean(i.witness_name, 120), role = clean(i.witness_role, 80), reason = clean(i.reason, 40);
+  if (name.length < 3 || !/\s/.test(name)) throw new UserError('Enter the witness’s full name.');
+  if (!role) throw new UserError('Say who the witness is (e.g. cooperative chairman, village head, extension officer).');
+  if (!['no_phone', 'no_signal', 'code_not_received', 'shared_phone'].includes(reason)) throw new UserError('Choose why a code could not be used.');
+  const wphone = i.witness_phone ? normPhone(i.witness_phone) : null;
+  if (!wphone) throw new UserError('Enter the witness’s phone so Kitovu can call them to confirm.');
+  if (wphone === f.phone_e164) throw new UserError('The witness must be someone other than the farmer.');
+  if (wphone === a.user.phone_e164) throw new UserError('The witness must be someone other than you.');
+  if (i.declare !== '1') throw new UserError('Tick the declaration.');
+  const att = { witness_name: name, witness_role: role, witness_phone: wphone, reason, by: a.user.id, by_name: a.user.full_name, at: new Date().toISOString() };
+  await db.run(`UPDATE farmers SET phone_check_method='attested', phone_attestation=$2, updated_at=now() WHERE id=$1`, f.id, att);
+  await audit(actorOf(a), 'farmer.presence_attested', { entity: 'farmer', entityId: f.id, data: { code: f.code, reason, witness_role: role } });
+}
+
+/** How many active farmers share this phone: one number on many records is a sign of registration on an agent's phone. */
+export const recordsOnPhone = async (phone: string | null) => (phone ? Number(await db.val(`SELECT count(*) FROM farmers WHERE phone_e164=$1 AND status='active'`, phone)) : 0);
 
 // ---------- step 2: ID + selfie, submitted for review ----------
 export async function submitLevel1(a: Actor, code: string, i: { id_type?: string; id_number?: string }, files: { id_doc?: Upload; selfie?: Upload }) {
@@ -62,7 +100,9 @@ export async function submitLevel1(a: Actor, code: string, i: { id_type?: string
   if (!f) throw new UserError('Farmer not found.');
   if (f.status !== 'active') throw new UserError('This record is not active.');
   if (f.kyc_level >= 1) throw new UserError('This farmer’s identity is already checked.');
-  if (!f.phone_verified_at) throw new UserError('Confirm the farmer’s phone with an SMS code first.');
+  const pm = await phoneMethods();
+  const checked = !!f.phone_verified_at || (f.phone_check_method === 'attested' && pm.attested);
+  if (pm.required && !checked) throw new UserError('Confirm the farmer’s phone with a code first (or record a witnessed attestation if they have no working phone).');
   const t = ID_TYPES[String(i.id_type)];
   if (!t) throw new UserError('Choose the type of ID.');
   const num = normId(i.id_number);
@@ -80,8 +120,9 @@ export async function submitLevel1(a: Actor, code: string, i: { id_type?: string
     const selfie = await saveFile(files.selfie, { kind: 'selfie', entity: 'farmer', entityId: f.id, userId: a.user.id, label: 'Photo of the farmer' });
     const id = await db.val<string>(
       `INSERT INTO kyc_submissions (farmer_id, id_type, id_number_hash, id_last4, id_doc_file_id, selfie_file_id, phone_verified, submitted_by, provider, provider_ref, provider_result)
-       VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8,$9,$10) RETURNING id`,
-      f.id, i.id_type, hash, num.slice(-4), idDoc, selfie, a.user.id, looked?.provider ?? null, looked?.ref ?? null, looked ? { match: looked.match, ...looked.detail } : null);
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      f.id, i.id_type, hash, num.slice(-4), idDoc, selfie, !!f.phone_verified_at, a.user.id, looked?.provider ?? null, looked?.ref ?? null, looked ? { match: looked.match, ...looked.detail } : null);
+    await db.run('UPDATE kyc_submissions SET phone_check_method=$2 WHERE id=$1', id, f.phone_verified_at ? f.phone_check_method : f.phone_check_method === 'attested' ? 'attested' : null);
     await db.run(`UPDATE farmers SET kyc='pending', updated_at=now() WHERE id=$1`, f.id);
     await audit(actorOf(a), 'kyc.submitted', { entity: 'farmer', entityId: f.id, data: { code: f.code, submission: id, id_type: i.id_type, last4: num.slice(-4), provider: looked?.match ?? 'none' } });
     return id!;
@@ -92,16 +133,20 @@ export interface Submission {
   id: string; farmer_id: string; farmer_code: string; full_name: string; phone_e164: string | null; state_name: string | null; community: string | null; year_of_birth: number | null;
   id_type: string; id_last4: string; id_doc_file_id: string; selfie_file_id: string; submitted_by: string; submitted_by_name: string; submitted_at: Date;
   status: string; reviewed_by_name: string | null; reviewed_at: Date | null; review_note: string | null; provider_result: any;
+  ai_flag: string | null; phone_check_method: string | null; phone_attestation: any; records_on_phone: number; ai?: any;
 }
 const SUB_SQL = `SELECT k.id, k.farmer_id, f.code AS farmer_code, f.full_name, f.phone_e164, s.name AS state_name, f.community, f.year_of_birth,
   k.id_type, k.id_last4, k.id_doc_file_id, k.selfie_file_id, k.submitted_by, su.full_name AS submitted_by_name, k.submitted_at,
-  k.status, ru.full_name AS reviewed_by_name, k.reviewed_at, k.review_note, k.provider_result
+  k.status, ru.full_name AS reviewed_by_name, k.reviewed_at, k.review_note, k.provider_result, k.ai_flag, k.phone_check_method, f.phone_attestation,
+  (SELECT count(*)::int FROM farmers f2 WHERE f2.phone_e164=f.phone_e164 AND f2.status='active') AS records_on_phone
   FROM kyc_submissions k JOIN farmers f ON f.id=k.farmer_id LEFT JOIN states s ON s.code=f.state_code
   JOIN users su ON su.id=k.submitted_by LEFT JOIN users ru ON ru.id=k.reviewed_by`;
 
 export async function reviewQueue(a: Actor) {
   if (!can(a.membership, 'kyc.review')) throw new NotAllowed('Only compliance can review identity checks.');
-  return db.all<Submission>(`${SUB_SQL} WHERE k.status='pending' ORDER BY k.submitted_at LIMIT 100`);
+  const rows = await db.all<Submission>(`${SUB_SQL} WHERE k.status='pending' ORDER BY k.submitted_at LIMIT 100`);
+  for (const r of rows) r.ai = await latestCheck(r.id);
+  return rows;
 }
 export const submissionsFor = (farmerId: string) => db.all<Submission>(`${SUB_SQL} WHERE k.farmer_id=$1 ORDER BY k.submitted_at DESC`, farmerId);
 
@@ -116,7 +161,7 @@ export const REJECT_REASONS: Record<string, string> = {
 
 export async function review(a: Actor, submissionId: string, decision: 'approve' | 'reject', o: { reason?: string; note?: string; checks?: string[] }) {
   if (!can(a.membership, 'kyc.review')) throw new NotAllowed('Only compliance can review identity checks.');
-  const k = await db.get<{ id: string; farmer_id: string; submitted_by: string; status: string; id_type: string; id_number_hash: string; id_last4: string; id_doc_file_id: string; selfie_file_id: string }>(
+  const k = await db.get<{ id: string; farmer_id: string; submitted_by: string; status: string; id_type: string; id_number_hash: string; id_last4: string; id_doc_file_id: string; selfie_file_id: string; ai_flag: string | null }>(
     'SELECT * FROM kyc_submissions WHERE id=$1', submissionId);
   if (!k || k.status !== 'pending') throw new UserError('This check is no longer waiting for review.');
   if (k.submitted_by === a.user.id) throw new NotAllowed('You submitted this check, so someone else must review it.');
@@ -142,6 +187,9 @@ export async function review(a: Actor, submissionId: string, decision: 'approve'
       await db.run(`UPDATE farmers SET kyc='failed', updated_at=now() WHERE id=$1`, k.farmer_id);
       await db.run(`UPDATE files SET delete_after=$3 WHERE id IN ($1,$2)`, k.id_doc_file_id, k.selfie_file_id, soon);
     }
+    // Track how often people agree with the AI flag (green→approve, red→reject), to judge it before relying on it more.
+    const agreed = k.ai_flag === 'green' ? decision === 'approve' : k.ai_flag === 'red' ? decision === 'reject' : null;
+    await db.run('UPDATE kyc_submissions SET reviewer_agreed_with_ai=$2 WHERE id=$1', k.id, agreed);
     await audit(actorOf(a), `kyc.${decision === 'approve' ? 'approved' : 'rejected'}`, { entity: 'farmer', entityId: k.farmer_id, data: { submission: k.id, reason: o.reason ?? null } });
   });
 }
@@ -152,13 +200,14 @@ export const CONSENT_TEXT = (lender: string) =>
 
 export async function lenders() { return db.all<{ id: string; name: string }>(`SELECT id, name FROM organisations WHERE kind='lender' AND status IN ('active','onboarding') ORDER BY name`); }
 
-export async function sendConsentCode(a: Actor, code: string, orgId: string) {
+export async function sendConsentCode(a: Actor, code: string, orgId: string, channel: 'sms' | 'voice' = 'sms') {
   if (!can(a.membership, 'farmers.edit')) throw new NotAllowed('Your role cannot record consent.');
   const f = await farmerByCode(a, code);
-  if (!f?.phone_e164 || !f.phone_verified_at) throw new UserError('Confirm the farmer’s phone first.');
+  if (!f?.phone_e164 || !f.phone_verified_at) throw new UserError('Consent by code needs a confirmed phone. Use the signed paper form instead.');
+  if (!(await phoneMethods())[channel]) throw new UserError(`${channel === 'sms' ? 'Text-message' : 'Voice-call'} codes are switched off.`);
   const lender = await db.get<{ name: string }>(`SELECT name FROM organisations WHERE id=$1 AND kind='lender'`, orgId);
   if (!lender) throw new UserError('Choose a lender.');
-  await issueOtp('farmer_consent', f.id, f.phone_e164, (c) => `StorageX: code ${c} lets Kitovu share your record with ${lender.name} for a loan. Give it only if you agree. Withdraw any time: call Kitovu.`);
+  await issueOtp('farmer_consent', f.id, f.phone_e164, (c) => `StorageX: code ${c} lets Kitovu share your record with ${lender.name} for a loan. Give it only if you agree. Withdraw any time: call Kitovu.`, channel);
 }
 
 export async function recordConsent(a: Actor, code: string, i: { org_id?: string; method?: string; otp?: string; read_aloud?: string }, evidence?: Upload) {
