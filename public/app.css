@@ -127,3 +127,12 @@ img.mini { width: 90px; height: 64px; object-fit: cover; border-radius: 6px; bor
 .passport.tone-bad .status { color: var(--bad); }
 .hist { padding-left: 20px; }
 .ok { color: var(--ok); }
+.ptypes { border: 0; padding: 0; margin: 0 0 18px; }
+.ptypes legend { font-weight: 700; font-size: 17px; margin-bottom: 8px; }
+.ptgroup h2 { font-size: 14px; color: var(--muted); font-weight: 600; margin: 16px 0 6px; }
+.ptype { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; cursor: pointer; background: #fff; }
+.ptype input { margin-top: 4px; }
+.ptype:has(input:checked) { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); background: #f3f8f5; }
+.pt-body { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.pt-body b { font-size: 15px; }
+.pt-body i { font-style: normal; color: var(--muted); }

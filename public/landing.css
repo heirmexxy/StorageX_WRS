@@ -43,7 +43,7 @@ main > section { padding: 72px max(24px, calc((100vw - 1120px) / 2)); }
 .stackcard figcaption { font-size: 13px; color: var(--soft); }
 
 .problem { background: var(--sack); }
-.problem h2, .guide h2, .plan h2, .others h2, .final h2 { font-size: clamp(32px, 4.4vw, 52px); font-weight: 800; max-width: 20ch; margin-bottom: 32px; }
+.problem h2, .guide h2, .plan h2, .partners h2, .final h2 { font-size: clamp(32px, 4.4vw, 52px); font-weight: 800; max-width: 20ch; margin-bottom: 32px; }
 .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; }
 .three h3 { font-size: 26px; margin-bottom: 10px; }
 .three p { margin: 0; color: var(--soft); max-width: 34em; }
@@ -93,3 +93,14 @@ main > section { padding: 72px max(24px, calc((100vw - 1120px) / 2)); }
   .lp-top nav a:not(.lp-btn):not([href="/login"]) { display: none; }
   .lp-foot a { margin: 0 16px 0 0; }
 }
+
+/* Partners: a quiet ruled list, each with its own way in. */
+.partners-lead { color: var(--soft); max-width: 40em; margin: -16px 0 32px; }
+.plist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); column-gap: 40px; }
+.plist li { border-top: 1px solid var(--rule); padding: 18px 0 22px; display: flex; flex-direction: column; }
+.plist h3 { font-size: 23px; margin-bottom: 6px; }
+.plist p { margin: 0 0 10px; color: var(--soft); font-size: 16px; flex: 1; }
+.plist a { font-weight: 600; }
+.plist li.farmers { background: var(--sack); padding: 18px 18px 22px; border-top: 3px solid var(--maize); }
+.partners h2 { font-size: clamp(32px, 4.4vw, 52px); font-weight: 800; max-width: 20ch; margin-bottom: 32px; }
+@media (max-width: 860px) { .plist { grid-template-columns: 1fr; } }

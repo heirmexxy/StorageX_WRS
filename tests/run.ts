@@ -904,6 +904,13 @@ async function main() {
     eq(await db.val(`SELECT status FROM organisations WHERE code='LMB'`), 'onboarding');
     await rejects(P.approveApplication(admin, app.id, {}));
   });
+  await t('partners without an account type are approved for follow-up, with no organisation or invitation', async () => {
+    eq(await P.submitApplication({ type: 'logistics', org_name: 'Sahel Haulage Ltd', contact_name: 'Bala Isa', email: 'bala@sahel.test', phone: '08012223333', agree: '1', about: '12 trucks, Kano to Lagos' }, '9.9.9.8'), 'ok');
+    const app = (await P.listApplications(admin)).find((x: any) => x.partner_type === 'logistics');
+    const r = await P.approveApplication(admin, app.id, {});
+    eq(r.link, null);
+    eq(await db.val('SELECT org_id FROM partner_applications WHERE id=$1', app.id), null);
+  });
 
   console.log('\nSMS second step');
   await t('a low-risk role can use SMS codes; gaining a sensitive role turns them off', async () => {

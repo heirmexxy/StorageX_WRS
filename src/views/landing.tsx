@@ -1,5 +1,22 @@
 import type { Ctx } from '../lib/http';
 
+const SHOWN: [string, string, string][] = [
+  ['warehouse_operator', 'Warehouse owners', 'Get your store certified, fill it with depositors, and earn storage fees on stock that lenders accept.'],
+  ['field_partner_network', 'Field agent networks', 'Your agents register and support farmers, and connect them to storage, loans and buyers.'],
+  ['cooperative', 'Co-operatives and associations', 'Store together, sell together in larger lots, and give members access to credit.'],
+  ['buyer', 'Buyers and processors', 'Buy graded, weighed stock from certified warehouses in the lots you need.'],
+  ['insurer', 'Insurers', 'Cover stored produce at sites with counts, photos and records behind every bag.'],
+  ['input_supplier', 'Input suppliers and agro-dealers', 'Sell next season’s inputs to farmers who can pay from their stored produce.'],
+  ['logistics', 'Transporters', 'Carry planned loads at known weights between farms, warehouses and buyers.'],
+  ['inspection', 'Inspectors and collateral managers', 'Grade, inspect and monitor stock across certified warehouses.'],
+  ['payments', 'Banks, fintechs and telcos', 'Handle buyer collections and farmer payouts, including mobile money.'],
+  ['distribution_partner', 'Trading platforms', 'Offer eligible receipts to your users through the StorageX API.'],
+  ['development', 'Development partners and guarantee funds', 'Back farmers with funding or guarantees, and see the results in the data.'],
+  ['government', 'Government and agencies', 'Bring a working receipt system to your state’s farmers and public warehouses.'],
+];
+const CTA: Record<string, string> = { warehouse_operator: 'Partner as a warehouse owner', field_partner_network: 'Partner as a network', cooperative: 'Partner as a co-operative', buyer: 'Partner as a buyer', insurer: 'Partner as an insurer',
+  input_supplier: 'Partner as a supplier', logistics: 'Partner as a transporter', inspection: 'Partner as an inspector', payments: 'Partner on payments', distribution_partner: 'Partner as a platform', development: 'Partner on a programme', government: 'Partner as an agency' };
+
 /** Public landing page, written on the StoryBrand frame: the lender is the hero, Kitovu the guide. */
 export function LandingPage({ c }: { c: Ctx }) {
   void c;
@@ -18,7 +35,7 @@ export function LandingPage({ c }: { c: Ctx }) {
           <a className="lp-brand" href="/">StorageX <span>by Kitovu</span></a>
           <nav aria-label="Main">
             <a href="#how">How it works</a>
-            <a href="#warehouses">Warehouses and networks</a>
+            <a href="#partners">Other partners</a>
             <a href="/sample-receipt">Check a receipt</a>
             <a href="/login">Sign in</a>
             <a className="lp-btn" href="/apply">Apply to partner</a>
@@ -102,13 +119,22 @@ export function LandingPage({ c }: { c: Ctx }) {
             </div>
           </section>
 
-          <section className="others" id="warehouses">
-            <h2>Not a lender?</h2>
-            <div className="three">
-              <div><h3>Warehouse owners</h3><p>Join as a certified site. We bring depositors and lenders; you earn storage fees on stock that is properly recorded.</p></div>
-              <div><h3>Field agent networks and co-operatives</h3><p>Register your farmers once, with consent, and connect them to storage and finance through your own agents.</p></div>
-              <div><h3>Farmers</h3><p>You do not need to sign up here. Ask a Kitovu field partner in your community, or call Kitovu, and they will register you.</p></div>
-            </div>
+          <section className="partners" id="partners">
+            <h2>Not a lender? There is a part for you.</h2>
+            <p className="partners-lead">A receipt system works only when many hands do their part well. These are the partners StorageX is built with.</p>
+            <ul className="plist">
+              {SHOWN.map(([k, t, line]) => (
+                <li key={k}>
+                  <h3>{t}</h3>
+                  <p>{line}</p>
+                  <a href={`/apply?type=${k}`}>{CTA[k] ?? 'Partner with us'}</a>
+                </li>
+              ))}
+              <li className="farmers">
+                <h3>Farmers</h3>
+                <p>You do not need to sign up here. Ask a Kitovu field partner in your community, or call Kitovu, and they will register you.</p>
+              </li>
+            </ul>
           </section>
 
           <section className="final">
@@ -120,7 +146,7 @@ export function LandingPage({ c }: { c: Ctx }) {
 
         <footer className="lp-foot">
           <p>StorageX is built and operated by Kitovu Technology Company Limited, Oyo State, Nigeria.</p>
-          <p><a href="/sample-receipt">Check a receipt</a> <a href="/apply">Apply to partner</a> <a href="/login">Staff and partner sign in</a></p>
+          <p><a href="#partners">Partners</a> <a href="/sample-receipt">Check a receipt</a> <a href="/apply">Apply to partner</a> <a href="/login">Staff and partner sign in</a></p>
         </footer>
       </body>
     </html>

@@ -142,7 +142,7 @@ get('/admin/applications', 'perm:orgs.manage', async (c) => {
   c.html(render(<ApplicationsPage c={c} rows={await P.listApplications(c.actor, status)} status={status} />));
 });
 post('/admin/applications/:id/approve', 'perm:orgs.manage', async (c) => {
-  try { const r = await P.approveApplication(c.actor, c.params.id, c.body); c.html(render(<ApplicationsPage c={c} rows={await P.listApplications(c.actor, 'new')} status="new" link={r} />)); }
+  try { const r = await P.approveApplication(c.actor, c.params.id, c.body); if (!r.link) { c.setFlash('ok', 'Approved. The partnerships team follows up; no account is created yet.'); return c.redirect('/admin/applications'); } c.html(render(<ApplicationsPage c={c} rows={await P.listApplications(c.actor, 'new')} status="new" link={r} />)); }
   catch (e) { if (!(e instanceof UserError)) throw e; c.back('/admin/applications', ['error', e.message]); }
 });
 post('/admin/applications/:id/reject', 'perm:orgs.manage', (c) => act(c, '/admin/applications', async () => { await P.rejectApplication(c.actor, c.params.id, c.body); return 'Application closed.'; }));

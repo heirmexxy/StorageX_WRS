@@ -2,6 +2,12 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-07 (Partner types)
+
+1. **Thirteen partner types in four groups**, each stating what the partner brings and gets: finance and trade (lender, buyer or processor, trading platform, insurer); storage and the field (warehouse owner, field agent network, co-operative); services (input supplier, transporter, inspector or collateral manager, payments provider); programmes and government (development partner or guarantee fund, government agency).
+2. **Partner type is separate from account type.** The seven that use StorageX directly get an organisation and an administrator invitation on approval; the others are approved for the partnerships team to agree terms, with no account until there is an integration for them.
+3. The landing page lists every type with its own link (`/apply?type=…`), which opens the form with that type chosen.
+
 ## 2026-11-07 (Build 8)
 
 1. **Kitovu arranges sales; owners agree; lenders approve.** A sale covers receipts of one crop at one warehouse (several farmers can sell together to one buyer). Each farmer agrees to the price by a code to their phone (text or voice) or a photographed signed slip; a lender holding a pledge approves the sale. Only then are the receipts committed ("Being sold" on the public page) and stock can be delivered.
