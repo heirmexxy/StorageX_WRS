@@ -15,6 +15,10 @@ export const DEFAULTS = {
   'kyc.ai_mode': 'assist' as 'assist' | 'off',
   /** AI reads the scale and moisture-meter photos of each delivery and compares them with the typed numbers. */
   'intake.ai_check': 'assist' as 'assist' | 'off',
+  /** Counts may fall short of what receipts claim by this much before it is a serious flag. */
+  'stock.tolerance_pct': 1,
+  /** Every stack holding stock should be counted at least this often. */
+  'stock.count_every_days': 30,
 };
 export type SettingKey = keyof typeof DEFAULTS;
 export type Settings = typeof DEFAULTS;
@@ -26,6 +30,8 @@ export const LABELS: Record<SettingKey, string> = {
   'phone_check.attested': 'Allow witnessed attestation for farmers without a working phone',
   'kyc.ai_mode': 'AI pre-check of ID photos for the reviewer',
   'intake.ai_check': 'AI reads scale and moisture-meter photos and compares them with the typed numbers',
+  'stock.tolerance_pct': 'Allowed shortfall of counted stock against receipts (%)',
+  'stock.count_every_days': 'Count every stack at least every (days)',
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -44,6 +50,12 @@ export async function saveSettings(a: Actor, input: Partial<Record<SettingKey, u
     const def = DEFAULTS[k];
     if (typeof def === 'boolean') next[k] = input[k] === true || input[k] === '1' || input[k] === 'on';
     else if (k === 'kyc.ai_mode' || k === 'intake.ai_check') next[k] = input[k] === 'off' ? 'off' : 'assist';
+    else if (typeof def === 'number') {
+      const v = Number(input[k]);
+      const [lo, hi] = k === 'stock.tolerance_pct' ? [0, 5] : [1, 180];
+      if (!Number.isFinite(v) || v < lo || v > hi) throw new UserError(`${LABELS[k]}: between ${lo} and ${hi}.`);
+      next[k] = v;
+    }
   }
   if (next['phone_check.required'] && !next['phone_check.sms'] && !next['phone_check.voice'] && !next['phone_check.attested'])
     throw new UserError('A phone check is required, so at least one way to do it must stay on.');

@@ -34,6 +34,11 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats }: { c: Ctx; s: 
           {!hasKey && <p className="flash info">No ANTHROPIC_API_KEY on this server yet, so the pre-check is skipped.</p>}
           <p className="small">{screened ? `Reviewers agreed with the AI flag on ${stats.agreed} and disagreed on ${stats.disagreed} of ${screened} decided checks (amber flags are not counted).` : 'No decided checks with an AI flag yet.'}</p>
         </section>
+        <section className="card">
+          <h2>Stock control</h2>
+          <label className="field"><span>{LABELS['stock.tolerance_pct']}</span><input name="stock.tolerance_pct" type="number" step="0.1" min="0" max="5" defaultValue={String(s['stock.tolerance_pct'])} /><small>Stored grain loses a little weight; a shortfall above this is flagged as serious.</small></label>
+          <label className="field"><span>{LABELS['stock.count_every_days']}</span><input name="stock.count_every_days" type="number" min="1" max="180" defaultValue={String(s['stock.count_every_days'])} /></label>
+        </section>
         <button className="primary">Save settings</button>
       </form>
     </Page>

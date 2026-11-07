@@ -2,6 +2,16 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-07 (Build 5)
+
+1. **One append-only stock ledger** (`stock_moves`): accepted deliveries in, releases out, moves between stacks, approved adjustments. Balances are sums; nothing is edited. Deliveries go onto the stack the clerk named (created if new), otherwise they wait as "not on a stack" until placed.
+2. **Releases against receipts are two-person.** Kitovu orders a release (amount, reason, the collector's name); someone else at the warehouse weighs it out, photographs the scale display and the signed release slip. The weighed amount may differ from the order by 0.5% (at least 1 kg); the receipt is reduced by what actually left. Fully withdrawn receipts close. The farmer is texted with what left and what is still held. The public page shows "Partly withdrawn" and the weight still held.
+3. **Losses and corrections are proposed, then approved by a different Kitovu person** before they touch the ledger. Only a recount correction can add stock.
+4. **Counts are bags counted plus a weighed sample** (or, without a sample, the ledger's average bag weight). A count is carried forward by any moves on its stack since it was taken.
+5. **Reconciliation per warehouse and crop** compares the ledger, what receipts still claim, and the counts. Serious flags: receipts claim more than the ledger holds, or counts fall short of receipts by more than the tolerance (Settings, default 1%). Review flags: stock not on a stack, stacks not counted within the interval (Settings, default 30 days).
+6. **Stock in doubt freezes trust, not data.** Kitovu can put every valid receipt for a crop at a warehouse "Under review"; the public page says so and releases stop until the review ends, which restores each receipt's previous status. Both steps are events in each receipt's history.
+7. Counts and releases are on the main site (works on a phone browser with signal). Offline counts in the gate app can follow if sites need them.
+
 ## 2026-11-07 (Build 4)
 
 1. **Receipts come only from accepted deliveries**, issued by Kitovu staff with receipt-issuing rights who did not record the delivery. Blocked when the farmer is not identity-checked (level 1), the warehouse is not certified or active, the warehouse is Tier D, or moisture is above the crop's limit (dry, re-test, record again).

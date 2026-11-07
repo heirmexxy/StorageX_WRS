@@ -163,6 +163,7 @@ export async function cancelReceipt(a: Actor, no: string, reason: string) {
   if (r.status !== 'issued') throw new UserError(`Only an issued receipt with no lien or sale can be cancelled (this one is ${r.status}).`);
   const issuedBy = await db.val<string>('SELECT issued_by FROM receipts WHERE id=$1', r.id);
   if (issuedBy === a.user.id) throw new UserError('You issued this receipt, so someone else must cancel it.');
+  if (await db.val(`SELECT 1 FROM releases WHERE receipt_id=$1 AND status <> 'cancelled'`, r.id)) throw new UserError('Stock has been ordered out on this receipt. Cancel the release first.');
   const why = clean(reason, 300);
   if (why.length < 10) throw new UserError('Explain the reason in a sentence (it appears on the public record as “cancelled”, the reason stays internal).');
   await tx(async () => {
@@ -185,7 +186,7 @@ const PUBLIC_STATUS: Record<string, { label: string; tone: 'ok' | 'warn' | 'bad'
   cancelled: { label: 'Cancelled', tone: 'bad', note: 'This receipt was cancelled and is not valid.' },
   expired: { label: 'Expired', tone: 'bad', note: 'This receipt has expired.' },
 };
-export const EVENT_LABEL: Record<string, string> = { issued: 'Issued', cancelled: 'Cancelled', legacy_issued: 'Issued (old system)', legacy_closed: 'Closed (old system)', liquidated: 'Liquidated', closed: 'Closed' };
+export const EVENT_LABEL: Record<string, string> = { issued: 'Issued', cancelled: 'Cancelled', released: 'Part withdrawn', review_started: 'Put under review', review_ended: 'Review ended', legacy_issued: 'Issued (old system)', legacy_closed: 'Closed (old system)', liquidated: 'Liquidated', closed: 'Closed' };
 
 export async function passport(token: string, sig: string | undefined, ip: string) {
   if (!(await rateLimit(`passport:${ip}`, 120, 600))) throw new UserError('Too many checks from this network. Wait a few minutes.');
@@ -197,9 +198,11 @@ export async function passport(token: string, sig: string | undefined, ip: strin
   const facts = signedFacts(r);
   const storedSigOk = !!r.signature && verify(facts, r.signature);
   const qrSig = sig ? (verify(facts, sig) ? 'match' : 'mismatch') : 'absent';
+  const held = await db.val<string>('SELECT remaining_kg FROM receipt_balances WHERE receipt_id=$1', r.id);
   const initials = r.farmer_name ? r.farmer_name.split(/\s+/).map((w) => w[0]?.toUpperCase() + '.').join(' ') : null;
   return {
     receipt_no: r.receipt_no, status: r.status, view: PUBLIC_STATUS[r.status] ?? { label: r.status, tone: 'warn' as const, note: '' },
+    held_kg: ['closed', 'settled', 'cancelled', 'expired'].includes(r.status) ? 0 : Number(held ?? r.net_weight_kg),
     commodity: r.commodity, grade: r.grade, moisture: r.moisture_pct, bags: r.bags, net_kg: Number(r.net_weight_kg), issued_at: r.issued_at, closed_at: r.closed_at,
     warehouse: `${r.wh_name}, ${r.wh_state} State`, wh_code: r.wh_code, tier: r.wh_tier, can_back_loans: r.can_back_loans, insured,
     owner: r.farmer_code ? `${initials} (${r.farmer_code})` : 'Organisation', lot: r.lots && r.lots > 1 ? `${r.lot_no} of ${r.lots}` : null,

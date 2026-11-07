@@ -21,6 +21,7 @@ import * as P from '../src/lib/applications';
 import * as S from '../src/lib/settings';
 import * as I from '../src/lib/intake';
 import * as Rc from '../src/lib/receipts';
+import * as St from '../src/lib/stock';
 import { verify as sigVerify } from '../src/lib/sign';
 import { screenIntake } from '../src/lib/agents/intake-screen';
 import vm from 'node:vm';
@@ -595,6 +596,86 @@ async function main() {
     ok(pdf.subarray(0, 5).toString() === '%PDF-' && pdf.includes(Buffer.from(rno)) && pdf.toString('latin1').trimEnd().endsWith('%%EOF'));
   });
 
+  console.log('\nStock control');
+  const whRow = (await db.get<{ id: string }>(`SELECT id FROM warehouses WHERE code='WH-NI-MNA-02'`))!;
+  const kitwh = (await db.val<string>(`SELECT id FROM organisations WHERE code='KITWH'`))!;
+  const gateClerk = await makeUser(admin, 'gate@kitwh.test', kitwh, 'warehouse_clerk');
+  const stackId = async (code: string) => (await db.val<string>('SELECT id FROM stacks WHERE warehouse_id=$1 AND code=$2', whRow.id, code))!;
+  await t('accepted deliveries enter the ledger on the stack the clerk named', async () => {
+    const b3 = (await St.stacksOf(whRow.id)).find((s) => s.code === 'B3');
+    ok(b3, 'stack B3 created from the delivery'); eq(b3.kg, 1000.5); eq(b3.bags, 10);
+    const r = (await St.reconcile(whRow.id)).find((x) => x.commodity_code === 'MAZ')!;
+    eq(r.owed_kg, 500.25, 'one live receipt (the other was cancelled)');
+    ok(r.flags.some((f: any) => f.text.includes('not counted')));
+    await rejects(db.run('UPDATE stock_moves SET kg = 1 WHERE warehouse_id=$1', whRow.id));
+  });
+  await t('counts estimate weight from a weighed sample and flag shortfalls against receipts', async () => {
+    const b3 = await stackId('B3');
+    const c1 = await St.recordCount(gateClerk, whRow.id, { stack: b3, bags: '10', sample_bags: '5', sample_kg: '500' });
+    eq(c1.est, 1000); eq(c1.diff, -0.5);
+    ok(!(await St.reconcile(whRow.id)).find((x) => x.commodity_code === 'MAZ')!.flags.some((f: any) => f.severity === 'hold'));
+    await St.recordCount(gateClerk, whRow.id, { stack: b3, bags: '4', sample_bags: '4', sample_kg: '400' });
+    const fl = (await St.reconcile(whRow.id)).find((x) => x.commodity_code === 'MAZ')!.flags;
+    ok(fl.some((f: any) => f.severity === 'hold' && f.text.includes('short')), JSON.stringify(fl));
+    await St.recordCount(gateClerk, whRow.id, { stack: b3, bags: '10', sample_bags: '5', sample_kg: '500' });
+    await rejects(St.recordCount(officer, whRow.id, { stack: b3, bags: '1' }));
+  });
+  await t('moving stock between stacks keeps the total', async () => {
+    await St.createStack(gateClerk, whRow.id, 'b4', 'MAZ');
+    await rejects(St.createStack(gateClerk, whRow.id, 'B4', 'MAZ'));
+    await St.transfer(gateClerk, whRow.id, { from: await stackId('B3'), to: await stackId('B4'), kg: '200', bags: '2' });
+    await rejects(St.transfer(gateClerk, whRow.id, { from: await stackId('B4'), to: await stackId('B3'), kg: '5000' }));
+    const st = await St.stacksOf(whRow.id);
+    eq(st.find((s) => s.code === 'B3').kg, 800.5); eq(st.find((s) => s.code === 'B4').kg, 200);
+  });
+  await t('losses post only after a different Kitovu person approves', async () => {
+    await St.proposeAdjustment(gateClerk, whRow.id, { stack: await stackId('B4'), kg: '-10', reason: 'moisture_loss', note: 'Dried down in the harmattan, reweighed 5 bags' });
+    await rejects(St.proposeAdjustment(gateClerk, whRow.id, { stack: await stackId('B4'), kg: '50', reason: 'other', note: 'Found some extra maize' }));
+    const [x] = await St.pendingAdjustments(whRow.id);
+    eq((await St.stacksOf(whRow.id)).find((s) => s.code === 'B4').kg, 200, 'not yet posted');
+    await rejects(St.decideAdjustment(gateClerk, x.id, true, ''));
+    await St.decideAdjustment(ops, x.id, true, 'Checked the sample weights');
+    eq((await St.stacksOf(whRow.id)).find((s) => s.code === 'B4').kg, 190);
+  });
+  await t('release: ordered by Kitovu, loaded by someone else, receipt reduced then closed', async () => {
+    const r = (await Rc.receiptByNo(admin, rno))!;
+    await rejects(St.orderRelease(officer, rno, { kg: '100', reason: 'owner_withdrawal', collector_name: 'Ada Okafor' }));
+    await rejects(St.orderRelease(ops, rno, { kg: '600', reason: 'owner_withdrawal', collector_name: 'Ada Okafor' }));
+    const o = await St.orderRelease(ops, rno, { kg: '300', reason: 'owner_withdrawal', collector_name: 'Ada Okafor', collector_phone: '08031234567' });
+    ok(/^REL-\d{6}-\d{3}$/.test(o.ref));
+    await rejects(Rc.cancelReceipt(admin, rno, 'Trying to cancel with a release pending'));
+    const files = { scale: photo(31).up, slip: photo(32).up };
+    await rejects(St.confirmLoading(ops, o.ref, { stack: await stackId('B3'), kg: '300', bags: '3' }, files));
+    await rejects(St.confirmLoading(gateClerk, o.ref, { stack: await stackId('B3'), kg: '330', bags: '3' }, files));
+    const done = await St.confirmLoading(gateClerk, o.ref, { stack: await stackId('B3'), kg: '300.5', bags: '3' }, files);
+    eq(done.closed, false); eq(done.remaining, 199.75, 'reduced by what was actually weighed out');
+    eq((await Rc.receiptByNo(admin, rno))!.status, 'partially_released');
+    const p = (await Rc.passport(r.verify_token, undefined, '8.8.8.8'))!;
+    eq(p.view.label, 'Partly withdrawn'); eq(p.held_kg, 199.75);
+    const o2 = await St.orderRelease(ops, rno, { reason: 'owner_withdrawal', collector_name: 'Ada Okafor' });
+    const d2 = await St.confirmLoading(gateClerk, o2.ref, { stack: await stackId('B3'), kg: '199.75', bags: '2' }, { scale: photo(33).up, slip: photo(34).up });
+    eq(d2.closed, true);
+    eq((await Rc.receiptByNo(admin, rno))!.status, 'closed');
+    eq((await Rc.eventsOf(r.id)).map((e) => e.event_type), ['issued', 'released', 'closed']);
+    ok(await Rc.chainOk(r.id));
+    eq((await St.stacksOf(whRow.id)).find((s) => s.code === 'B3').kg, 300.25);
+    await rejects(St.orderRelease(ops, rno, { kg: '1', reason: 'owner_withdrawal', collector_name: 'Ada Okafor' }));
+  });
+  await t('stock in doubt: put receipts under review, then restore them', async () => {
+    const codeIntake = (await db.get<{ id: string; ref: string }>(`SELECT id, ref FROM intakes WHERE farmer_confirmation='code' LIMIT 1`))!;
+    await I.reviewIntake(admin, codeIntake.ref, 'accept', 'ok');
+    const iss = await Rc.issueFromIntake(admin, codeIntake.id);
+    const no = iss.receipts[0].no;
+    eq(await St.setUnderReview(ops, whRow.id, 'MAZ', true, 'Count came up short on stack B3, investigating'), 1);
+    const r = (await Rc.receiptByNo(admin, no))!;
+    eq(r.status, 'under_exception');
+    eq((await Rc.passport(r.verify_token, undefined, '8.8.8.8'))!.view.label, 'Under review');
+    await rejects(St.orderRelease(ops, no, { reason: 'owner_withdrawal', collector_name: 'Ada Okafor' }));
+    eq(await St.setUnderReview(ops, whRow.id, 'MAZ', false, 'Recount matched, stock confirmed'), 1);
+    eq((await Rc.receiptByNo(admin, no))!.status, 'issued');
+    ok(await Rc.chainOk(r.id));
+  });
+
   console.log('\nPartner applications');
   await t('public application → approve creates the org and an admin invitation', async () => {
     eq(await P.submitApplication({ kind: 'lender', org_name: 'Bot Bank', contact_name: 'Bot', email: 'b@b.co', phone: '08011112222', agree: '1', website: 'http://spam' }, '9.9.9.9'), 'spam');
@@ -736,7 +817,7 @@ async function main() {
 
   await t('Receipt Passport and signing key are public', async () => {
     const r = (await Rc.receiptByNo(admin, rno))!;
-    const pg = await req('GET', `/r/${r.verify_token}?s=${r.signature}`); eq(pg.status, 200); ok(pg.text.includes('Valid') && pg.text.includes(rno));
+    const pg = await req('GET', `/r/${r.verify_token}?s=${r.signature}`); eq(pg.status, 200); ok(pg.text.includes('Closed') && pg.text.includes(rno));
     eq((await req('GET', `/r/${'f'.repeat(32)}`)).status, 404);
     const k = await req('GET', '/.well-known/storagex-receipt-key.json'); eq(k.status, 200); ok(JSON.parse(k.text).keys[0].crv === 'Ed25519');
   });

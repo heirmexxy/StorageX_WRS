@@ -12,6 +12,7 @@ import { issueOtp, checkOtp } from './otp';
 import { sendSms } from './sms';
 import { getSettings } from './settings';
 import { hmac, clean } from './util';
+import { placeIntake } from './stock';
 import type { Upload } from './http';
 
 export class Conflict extends UserError {}
@@ -256,6 +257,8 @@ export async function reviewIntake(a: Actor, ref: string, decision: 'accept' | '
   const status = { accept: 'accepted', hold: 'held', reject: 'rejected' }[decision];
   await tx(async () => {
     await db.run('UPDATE intakes SET status=$2, reviewed_by=$3, reviewed_at=now(), review_note=$4 WHERE id=$1', i.id, status, a.user.id, n || null);
+    // Accepted stock enters the stock ledger, on the stack the clerk named.
+    if (status === 'accepted') await placeIntake(a.user.id, { id: i.id, warehouse_id: i.warehouse_id, commodity_code: i.commodity_code, net_kg: i.net, bags: i.bags, stack_ref: i.stack_ref });
     await audit(actorOf(a), `intake.${status}`, { entity: 'intake', entityId: i.id, data: { ref: i.ref, note: n || null } });
   });
 }

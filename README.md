@@ -23,6 +23,7 @@ Node 22 and TypeScript, server-rendered React, PostgreSQL 16, built with esbuild
 | `src/lib/intake.ts`, `public/intake/` | Deliveries: server checks and review; the offline gate app (ES5, service worker) |
 | `src/lib/agents/intake-screen.ts` | AI reading of scale and moisture-meter photos |
 | `src/lib/receipts.ts`, `sign.ts`, `pdf.ts` | Receipts: issue, split, cancel, Ed25519 signature, public Receipt Passport, printable PDF |
+| `src/lib/stock.ts` | Stock ledger, stacks, releases, adjustments, counts, reconciliation |
 | `src/lib/settings.ts` | Settings changed from the admin screen (phone-check methods, AI pre-check) |
 | `src/lib/agents/kyc-screen.ts` | AI pre-check of identity photos (advisory; flag computed in code) |
 | `src/lib/money.ts` | Kobo parsing and formatting |

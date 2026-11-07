@@ -38,7 +38,7 @@ export function ReceiptsPage({ c, rows, q }: { c: Ctx; rows: Receipt[]; q: Recor
   );
 }
 
-export function ReceiptPage({ c, r, events, chainOk, url }: { c: Ctx; r: Receipt; events: any[]; chainOk: boolean; url: string }) {
+export function ReceiptPage({ c, r, events, chainOk, url, bal, rels }: { c: Ctx; r: Receipt; events: any[]; chainOk: boolean; url: string; bal?: { remaining_kg: number; released_kg: number }; rels?: any[] }) {
   const kitovu = c.membership?.org_kind === 'kitovu';
   return (
     <Page c={c} title={r.receipt_no}>
@@ -49,6 +49,7 @@ export function ReceiptPage({ c, r, events, chainOk, url }: { c: Ctx; r: Receipt
             <dt>Owner</dt><dd>{r.farmer_name ? <a href={`/farmers/${r.farmer_code}`}>{r.farmer_name}</a> : '—'} {r.farmer_code}</dd>
             <dt>Crop</dt><dd>{r.commodity}{r.grade ? `, grade ${r.grade}` : ''}</dd>
             <dt>Net weight</dt><dd><b>{kg(r.net_weight_kg)}</b>{r.bags ? ` in ${r.bags} bags` : ''}</dd>
+            {bal && bal.released_kg > 0 && <><dt>Still held</dt><dd><b>{kg(bal.remaining_kg)}</b>{` (${kg(bal.released_kg)} withdrawn)`}</dd></>}
             <dt>Moisture</dt><dd>{r.moisture_pct ? `${Number(r.moisture_pct)}%` : '—'}</dd>
             <dt>Warehouse</dt><dd>{`${r.wh_name} (${r.wh_code}), tier ${r.wh_tier}`}{r.can_back_loans ? '' : ' · cannot back loans now'}</dd>
             <dt>Issued</dt><dd>{`${fmtDate(r.issued_at)}${r.issued_by_name ? ` by ${r.issued_by_name}` : ''}`}</dd>
@@ -73,6 +74,28 @@ export function ReceiptPage({ c, r, events, chainOk, url }: { c: Ctx; r: Receipt
           ))}</tbody>
         </table>
       </section>
+      {(rels?.length || (kitovu && can(c.membership, 'receipts.issue') && ['issued', 'partially_released'].includes(r.status))) ? (
+        <section className="card">
+          <h2>Release stock</h2>
+          {rels && rels.length > 0 && (
+            <table>
+              <thead><tr><th>Ref</th><th>Ordered</th><th>Loaded</th><th>Collector</th><th>Status</th></tr></thead>
+              <tbody>{rels.map((x: any) => <tr key={x.ref}><td>{can(c.membership, 'stock.manage') ? <a className="mono" href={`/releases/${x.ref}`}>{x.ref}</a> : x.ref}</td><td>{`${kg(x.ordered)} · ${fmtDay(x.ordered_at)}`}</td><td>{x.loaded ? `${kg(x.loaded)} · ${fmtDay(x.loaded_at)}` : '—'}</td><td>{x.collector_name}</td><td>{x.status}</td></tr>)}</tbody>
+            </table>
+          )}
+          {kitovu && can(c.membership, 'receipts.issue') && ['issued', 'partially_released'].includes(r.status) && (
+            <form method="post" action={`/receipts/${r.receipt_no}/release`} className="grid">
+              <Csrf c={c} />
+              <label className="field"><span>Kilograms (empty = all still held)</span><input name="kg" inputMode="decimal" /></label>
+              <label className="field"><span>Why</span><select name="reason" required defaultValue=""><option value="">Choose…</option><option value="owner_withdrawal">Owner takes the stock</option><option value="sale_delivery">Delivery to a buyer</option><option value="other">Other</option></select></label>
+              <label className="field"><span>Collector’s name (as on their ID)</span><input name="collector_name" required /></label>
+              <label className="field"><span>Collector’s phone</span><input name="collector_phone" type="tel" /></label>
+              <button>Order release</button>
+            </form>
+          )}
+          <p className="muted small">Kitovu orders a release; someone else at the warehouse weighs it out and photographs the scale and the signed slip. The receipt is reduced or closed when loading is confirmed.</p>
+        </section>
+      ) : null}
       {kitovu && can(c.membership, 'receipts.issue') && r.status === 'issued' && (
         <section className="card">
           <h2>Cancel this receipt</h2>
@@ -99,6 +122,7 @@ export function PassportPage({ c, p }: { c: Ctx; p: any }) {
         <dl className="facts">
           <dt>Produce</dt><dd>{`${p.commodity}${p.grade ? `, grade ${p.grade}` : ''}`}</dd>
           <dt>Net weight</dt><dd><b>{kg(p.net_kg)}</b>{p.bags ? ` in ${p.bags} bags` : ''}</dd>
+          {p.held_kg !== p.net_kg && <><dt>Still held</dt><dd><b>{kg(p.held_kg)}</b></dd></>}
           {p.moisture && <><dt>Moisture at intake</dt><dd>{`${Number(p.moisture)}%`}</dd></>}
           <dt>Warehouse</dt><dd>{`${p.warehouse} (tier ${p.tier})`}</dd>
           <dt>Insurance</dt><dd>{p.insured ? 'Current policy on record' : 'No current policy on record'}</dd>
