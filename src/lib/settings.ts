@@ -28,6 +28,10 @@ export const DEFAULTS = {
   'price.outlier_pct': 25,
   /** A fall in a receipt's price of this much since the last valuation is flagged. */
   'price.drop_alert_pct': 10,
+  /** Kitovu's charges taken from sale proceeds before the lender and the farmer (kobo; basis points). */
+  'fees.storage_kobo_per_kg_month': 300,
+  'fees.handling_kobo_per_kg': 100,
+  'fees.sale_commission_bp': 150,
 };
 export type SettingKey = keyof typeof DEFAULTS;
 export type Settings = typeof DEFAULTS;
@@ -46,6 +50,9 @@ export const LABELS: Record<SettingKey, string> = {
   'price.min_observations': 'Prices needed before a value is given',
   'price.outlier_pct': 'Price needs an explanation if it differs from the reference by more than (%)',
   'price.drop_alert_pct': 'Flag a price fall since the last valuation of more than (%)',
+  'fees.storage_kobo_per_kg_month': 'Storage fee (kobo per kg per month)',
+  'fees.handling_kobo_per_kg': 'Handling fee (kobo per kg, in and out)',
+  'fees.sale_commission_bp': 'Sale commission (basis points: 150 = 1.5%)',
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -66,7 +73,7 @@ export async function saveSettings(a: Actor, input: Partial<Record<SettingKey, u
     else if (k === 'kyc.ai_mode' || k === 'intake.ai_check' || k === 'loans.ai_note') next[k] = input[k] === 'off' ? 'off' : 'assist';
     else if (typeof def === 'number') {
       const v = Number(input[k]);
-      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50] } as Record<string, number[]>)[k] ?? [1, 180];
+      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000] } as Record<string, number[]>)[k] ?? [1, 180];
       if (!Number.isFinite(v) || v < lo || v > hi) throw new UserError(`${LABELS[k]}: between ${lo} and ${hi}.`);
       next[k] = v;
     }

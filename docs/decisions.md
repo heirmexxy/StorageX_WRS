@@ -2,6 +2,16 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-07 (Build 8)
+
+1. **Kitovu arranges sales; owners agree; lenders approve.** A sale covers receipts of one crop at one warehouse (several farmers can sell together to one buyer). Each farmer agrees to the price by a code to their phone (text or voice) or a photographed signed slip; a lender holding a pledge approves the sale. Only then are the receipts committed ("Being sold" on the public page) and stock can be delivered.
+2. **Buyers pay Kitovu's collection account quoting the sale reference.** Finance records each payment; one whose reference contains the sale reference and fits the amount due matches by itself. Matching by hand needs someone other than the person who recorded it. Overpayments are refused onto a sale.
+3. **Delivery to the buyer uses the Build 5 release** (ordered by one person, weighed out by another with scale and slip photos). The receipt stays "being sold" until settlement.
+4. **Settlement waterfall, per receipt:** Kitovu storage (per kg per month, from issue to settlement), handling (in and out) and sale commission, then the lender's loan (posted as a repayment from the sale; the loan closes if covered), then the farmer's balance. A loan secured by several receipts is paid from them in turn. A shortfall is shown and stays owed to the lender. Fees are in Settings (defaults: 300 kobo/kg/month, 100 kobo/kg each way, 1.5%), to be confirmed with finance.
+5. **Settling requires full payment and full delivery**, by a finance person who did not arrange the sale. It releases the pledges and closes the receipts as "settled", each with an event in its history.
+6. **Payouts** to lenders and farmers are recorded with transfer references by someone other than the settler; the farmer gets a text.
+7. **Farmer statement** (deliveries, receipts, loans, sales with the waterfall, paid and waiting) is a printable page for Kitovu and the farmer's own network.
+
 ## 2026-11-07 (Landing page)
 
 1. **The public home page is a StoryBrand page for lenders.** Hero: the lender. Problem: three questions rural lending cannot answer (is the stock there, has someone else lent against it, what is it worth today), and the farmer selling at harvest as the reason it matters. Guide: Kitovu, with the specific controls as authority rather than slogans. Plan: three steps. Calls to action: "Apply to partner" (direct) and "See a sample receipt" (transitional). Stakes and success side by side. Short sections for warehouse owners, networks and farmers.

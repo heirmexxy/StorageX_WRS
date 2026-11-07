@@ -48,6 +48,13 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats }: { c: Ctx; s: 
             <label className="field" key={k}><span>{LABELS[k]}</span><input name={k} type="number" step="1" defaultValue={String(s[k])} /></label>
           ))}
         </section>
+        <section className="card">
+          <h2>Kitovu fees on sales</h2>
+          <p className="muted">Taken from sale proceeds first, then the lender’s loan, then the farmer’s balance.</p>
+          {(['fees.storage_kobo_per_kg_month', 'fees.handling_kobo_per_kg', 'fees.sale_commission_bp'] as const).map((k) => (
+            <label className="field" key={k}><span>{LABELS[k]}</span><input name={k} type="number" step="1" defaultValue={String(s[k])} /></label>
+          ))}
+        </section>
         <button className="primary">Save settings</button>
       </form>
     </Page>

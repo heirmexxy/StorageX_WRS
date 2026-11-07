@@ -186,7 +186,7 @@ const PUBLIC_STATUS: Record<string, { label: string; tone: 'ok' | 'warn' | 'bad'
   cancelled: { label: 'Cancelled', tone: 'bad', note: 'This receipt was cancelled and is not valid.' },
   expired: { label: 'Expired', tone: 'bad', note: 'This receipt has expired.' },
 };
-export const EVENT_LABEL: Record<string, string> = { issued: 'Issued', cancelled: 'Cancelled', released: 'Part withdrawn', pledged: 'Pledged to a lender', financed: 'Loan paid out', lien_released: 'Pledge released', review_started: 'Put under review', review_ended: 'Review ended', legacy_issued: 'Issued (old system)', legacy_closed: 'Closed (old system)', liquidated: 'Liquidated', closed: 'Closed' };
+export const EVENT_LABEL: Record<string, string> = { issued: 'Issued', cancelled: 'Cancelled', released: 'Part withdrawn', pledged: 'Pledged to a lender', financed: 'Loan paid out', lien_released: 'Pledge released', sale_approved: 'Sale agreed', sale_cancelled: 'Sale cancelled', settled: 'Sold and settled', review_started: 'Put under review', review_ended: 'Review ended', legacy_issued: 'Issued (old system)', legacy_closed: 'Closed (old system)', liquidated: 'Liquidated', closed: 'Closed' };
 
 export async function passport(token: string, sig: string | undefined, ip: string) {
   if (!(await rateLimit(`passport:${ip}`, 120, 600))) throw new UserError('Too many checks from this network. Wait a few minutes.');

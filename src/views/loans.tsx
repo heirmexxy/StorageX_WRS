@@ -8,11 +8,17 @@ const N = (k: number) => fmtNGN(Math.round(k));
 const kit = (c: Ctx) => c.membership?.org_kind === 'kitovu';
 const TONE: Record<string, string> = { approved: 'warn', disbursed: 'ok', repaid: '', cancelled: '', submitted: 'warn', draft: '', decided: 'ok', pending: 'warn', rejected: '' };
 
-export function LoansPage({ c, loans, batches, products, alerts, allProducts }: { c: Ctx; loans: any[]; batches: any[]; products: any[]; alerts: any[]; allProducts: any[] }) {
+export function LoansPage({ c, loans, batches, products, alerts, allProducts, salesToApprove = [] }: { c: Ctx; loans: any[]; batches: any[]; products: any[]; alerts: any[]; allProducts: any[]; salesToApprove?: any[] }) {
   const lenderAdmin = can(c.membership, 'finance.configure') && ['lender', 'kitovu'].includes(c.membership!.org_kind);
   return (
     <Page c={c} title="Loans">
       <div className="head"><h1>Loans</h1>{c.membership?.org_kind !== 'kitovu' && <a className="button" href="/loans/ncr.csv">Collateral registry file (CSV)</a>}</div>
+      {salesToApprove.length > 0 && (
+        <section className="card">
+          <h2>Sales waiting for your approval</h2>
+          <ul>{salesToApprove.map((s: any) => <li key={s.ref}><a className="mono" href={`/sales/${s.ref}`}>{s.ref}</a>{` · ${s.buyer_name}`}</li>)}</ul>
+        </section>
+      )}
       {alerts.length > 0 && (
         <section className="card">
           <h2>Needs attention</h2>

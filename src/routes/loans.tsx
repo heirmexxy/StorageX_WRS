@@ -6,12 +6,14 @@ import { render } from '../views/layout';
 import { LoansPage, BatchPage, LoanPage } from '../views/loans';
 import { act } from './admin';
 import { can } from '../lib/rbac';
+import { db } from '../lib/db';
 
 get('/loans', 'perm:finance.view', async (c) => {
   const kit = c.membership?.org_kind === 'kitovu';
   c.html(render(<LoansPage c={c} loans={await F.loansFor(c.actor, { status: c.query.status })} batches={await F.batchesFor(c.actor)}
     products={['lender', 'kitovu'].includes(c.membership!.org_kind) ? await F.productsOf(c.membership!.org_id) : []}
-    alerts={can(c.membership, 'finance.view') ? await F.marginAlerts(kit ? null : c.membership!.org_id) : []} allProducts={kit ? await F.activeProducts() : []} />));
+    alerts={can(c.membership, 'finance.view') ? await F.marginAlerts(kit ? null : c.membership!.org_id) : []} allProducts={kit ? await F.activeProducts() : []}
+    salesToApprove={kit ? [] : await db.all(`SELECT DISTINCT s.ref, s.buyer_name FROM sale_items x JOIN sales s ON s.id=x.sale_id WHERE x.lender_org_id=$1 AND x.lender_approved_at IS NULL AND s.status='proposed'`, c.membership!.org_id)} />));
 });
 get('/loans/ncr.csv', 'perm:finance.view', async (c) => {
   const csv = await F.ncrCsv(c.actor);

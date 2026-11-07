@@ -24,6 +24,7 @@ import * as Rc from '../src/lib/receipts';
 import * as St from '../src/lib/stock';
 import * as V from '../src/lib/valuation';
 import * as F from '../src/lib/finance';
+import * as SL from '../src/lib/settlement';
 import { reviewLine } from '../src/lib/agents/batch-review';
 import { verify as sigVerify } from '../src/lib/sign';
 import { screenIntake } from '../src/lib/agents/intake-screen';
@@ -811,6 +812,82 @@ async function main() {
   await t('Kitovu can lend from its own balance sheet with the same controls', async () => {
     await F.createProduct(admin, { name: 'Kitovu bridge 60', interest_pct_month: '2.5', tenor_days: '60', max_naira: '500000', min_kyc_level: '1' });
     ok((await F.activeProducts()).some((p) => p.lender_code === 'KITOVU'));
+  });
+
+  console.log('\nSettlement: sale to farmer paid');
+  const kfin = await makeUser(admin, 'finance@kitovu.com.ng', admin.membership!.org_id, 'finance');
+  let saleRef = '', saleIdv = '', loan2 = '';
+  await t('setup: a fresh loan against the receipt', async () => {
+    const prod = (await F.productsOf(accionId)).find((p) => p.name === 'Harvest 90');
+    const b = await F.createBatch(ops, prod.id);
+    await F.addLine(ops, b.id, { farmer: ada, receipts: liveNo });
+    await F.submitBatch(ops, b.id, (id) => reviewLine(id, null));
+    const line = (await F.batchView(officer, b.ref))!.lines[0];
+    await F.decideLine(officer, line.id, true, {});
+    loan2 = (await F.batchView(officer, b.ref))!.lines[0].loan_no;
+    await F.disburse(officer2, loan2, { reference: 'TRF-009988' });
+    eq((await Rc.receiptByNo(admin, liveNo))!.status, 'financed');
+  });
+  await t('a sale needs the farmer’s agreement and the lender’s approval before the receipt is committed', async () => {
+    await rejects(SL.proposeSale(officer, { buyer: 'Test Mills Ltd', price: '500', receipts: liveNo }));
+    const s1 = await SL.proposeSale(ops, { buyer: 'Test Mills Ltd', price: '500', receipts: liveNo }); saleRef = s1.ref; saleIdv = s1.id;
+    await rejects(SL.proposeSale(ops, { buyer: 'Other Buyer', price: '510', receipts: liveNo }));
+    const sv = (await SL.saleView(admin, saleRef))!;
+    const it = sv.items[0];
+    await SL.sendAgreementCode(ops, it.id, 'sms');
+    ok(sentForTests.at(-1)!.text.includes('Test Mills'));
+    await rejects(SL.recordAgreement(ops, it.id, { method: 'code', otp: '000000' }));
+    await SL.recordAgreement(ops, it.id, { method: 'code', otp: lastCode() });
+    eq((await SL.saleView(admin, saleRef))!.status, 'proposed', 'lender still to approve');
+    await rejects(SL.lenderApprove(other, it.id));
+    await SL.lenderApprove(officer, it.id);
+    eq((await SL.saleView(admin, saleRef))!.status, 'approved');
+    const r = (await Rc.receiptByNo(admin, liveNo))!;
+    eq(r.status, 'sale_approved'); eq((await Rc.passport(r.verify_token, undefined, '9.9.9.1'))!.view.label, 'Being sold');
+    await rejects(St.orderRelease(ops, liveNo, { reason: 'owner_withdrawal', collector_name: 'Ada Okafor' }));
+  });
+  await t('delivery to the buyer and the buyer’s payment are both required to settle', async () => {
+    const refs = await SL.orderDelivery(ops, saleIdv, 'Musa Driver', '08070000000');
+    eq(refs.length, 1);
+    await rejects(SL.settle(kfin, saleIdv));
+    const x = (await St.releaseByRef(gateClerk, refs[0]))!;
+    const stack = (await St.stacksOf(x.warehouse_id)).find((st) => st.commodity_code === 'MAZ' && st.kg >= x.ordered);
+    await St.confirmLoading(gateClerk, refs[0], { stack: stack.id, kg: String(x.ordered), bags: '2' }, { scale: photo(41).up, slip: photo(42).up });
+    eq((await Rc.receiptByNo(admin, liveNo))!.status, 'sale_approved', 'stays being sold until settled');
+    const money = await SL.saleMoney(saleIdv);
+    await rejects(SL.settle(kfin, saleIdv));
+    await rejects(SL.recordCollection(ops, { amount: '1000', reference: 'x', payer: 'y' }));
+    const c1 = await SL.recordCollection(kfin, { amount: String(money.gross / 100), reference: `NIP/TEST MILLS/${saleRef}`, payer: 'Test Mills Ltd' });
+    eq(c1.matched, true);
+  });
+  await t('settlement waterfall: Kitovu fees, then the loan, then the farmer; liens released, receipt settled', async () => {
+    await rejects(SL.settle(ops, saleIdv));
+    const preview = await SL.previewWaterfall(saleIdv);
+    const it = preview[0];
+    eq(it.lines.reduce((n, l) => n + l.amount, 0), it.gross, 'every kobo accounted for');
+    ok(it.toLender > 0 && it.shortfall === 0);
+    const totals = await SL.settle(kfin, saleIdv);
+    eq(totals.kitovu + totals.lender + totals.farmer, totals.gross);
+    eq((await F.loanView(officer, loan2))!.status, 'repaid');
+    const r = (await Rc.receiptByNo(admin, liveNo))!;
+    eq(r.status, 'settled');
+    ok((await Rc.eventsOf(r.id)).map((e) => e.event_type).includes('settled'));
+    ok(await Rc.chainOk(r.id));
+    eq(await db.val('SELECT count(*)::int FROM liens WHERE receipt_id=$1 AND released_at IS NULL', r.id), 0);
+    await rejects(SL.settle(kfin, saleIdv));
+  });
+  await t('payouts are recorded by someone other than the settler; the farmer statement shows the money', async () => {
+    const sv = (await SL.saleView(admin, saleRef))!;
+    const farmerLine = sv.settlement.lines.find((l: any) => l.party === 'farmer');
+    await rejects(SL.markPaid(kfin, farmerLine.id, 'TRF-PAYOUT-1'));
+    await rejects(SL.markPaid(admin, farmerLine.id, '0123456789'));
+    await SL.markPaid(admin, farmerLine.id, 'TRF-PAYOUT-1');
+    ok(sentForTests.at(-1)!.text.includes('TRF-PAYOUT-1'));
+    const f = (await R.farmerByCode(ops, ada))!;
+    const st = await SL.farmerStatement(f.id);
+    eq(st.paid, farmerLine.amount); ok(st.sales.some((x: any) => x.ref === saleRef));
+    const lenderView = (await SL.saleView(officer, saleRef))!;
+    ok(lenderView.settlement.lines.every((l: any) => l.org_id === accionId || l.party !== 'lender'));
   });
 
   console.log('\nPartner applications');

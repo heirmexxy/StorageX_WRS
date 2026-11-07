@@ -26,6 +26,7 @@ Node 22 and TypeScript, server-rendered React, PostgreSQL 16, built with esbuild
 | `src/lib/stock.ts` | Stock ledger, stacks, releases, adjustments, counts, reconciliation |
 | `src/lib/valuation.ts` | Prices, reference prices, valuation policies, daily revaluation |
 | `src/lib/finance.ts`, `agents/batch-review.ts` | Loan products, batches, liens, disbursement, repayments, margin watch, NCR file; batch reviewer agent |
+| `src/lib/settlement.ts` | Sales, agreements, buyer payments, settlement waterfall, payouts, farmer statements |
 | `src/lib/settings.ts` | Settings changed from the admin screen (phone-check methods, AI pre-check) |
 | `src/lib/agents/kyc-screen.ts` | AI pre-check of identity photos (advisory; flag computed in code) |
 | `src/lib/money.ts` | Kobo parsing and formatting |

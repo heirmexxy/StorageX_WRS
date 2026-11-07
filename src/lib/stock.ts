@@ -279,8 +279,10 @@ export async function confirmLoading(a: Actor, ref: string, i: { stack?: string;
     await db.run(`INSERT INTO stock_moves (warehouse_id, commodity_code, stack_id, kind, kg, bags, ref_type, ref_id, created_by) VALUES ($1,$2,$3,'out',$4,$5,'release',$6,$7)`,
       x.warehouse_id, x.commodity_code, s.id, -kg, -bags, x.id, a.user.id);
     const remaining = r2(rb.remaining_kg - take);
-    const closed = remaining <= 0.5;
-    await db.run(`UPDATE receipts SET status=$2, closed_at=CASE WHEN $3 THEN now() END, closed_reason=CASE WHEN $3 THEN 'All stock withdrawn' END, distribution_enabled=false WHERE id=$1`,
+    // Deliveries to a buyer keep the receipt "being sold" until the sale is settled.
+    const forSale = x.receipt_status === 'sale_approved';
+    const closed = !forSale && remaining <= 0.5;
+    if (!forSale) await db.run(`UPDATE receipts SET status=$2, closed_at=CASE WHEN $3 THEN now() END, closed_reason=CASE WHEN $3 THEN 'All stock withdrawn' END, distribution_enabled=false WHERE id=$1`,
       x.rid, closed ? 'closed' : 'partially_released', closed);
     await db.run(`INSERT INTO receipt_events (receipt_id, event_type, occurred_at, actor, data) VALUES ($1,$2,now(),$3,$4)`, x.rid, closed ? 'closed' : 'released', `user:${a.user.id}`,
       JSON.stringify({ release: x.ref, kg: r2(take), bags, remaining_kg: Math.max(0, remaining), reason: x.reason }));

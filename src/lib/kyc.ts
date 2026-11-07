@@ -287,6 +287,7 @@ export const verificationsFor = (a: Actor, farmerId: string) => db.all<{ org_nam
 export async function canOpenFile(a: Actor, f: { kind: string; entity: string; entity_id: string }) {
   const m = a.membership;
   // Delivery photos: Kitovu, and the operator of the warehouse where the delivery was recorded.
+  if (f.kind === 'sale_evidence') return !!m && m.org_kind === 'kitovu' && (can(m, 'receipts.issue') || can(m, 'finance.approve'));
   if (f.kind === 'price_evidence') return !!m && can(m, 'finance.view') && m.org_kind === 'kitovu';
   if (f.kind === 'stock_evidence') return can(m, 'stock.manage') && (m!.org_kind === 'kitovu' || !!(await db.val(`SELECT 1 FROM stacks s JOIN warehouses w ON w.id=s.warehouse_id WHERE s.id=$1 AND w.operator_org_id=$2 UNION SELECT 1 FROM releases x JOIN receipts r ON r.id=x.receipt_id JOIN warehouses w ON w.id=r.warehouse_id WHERE x.id=$1 AND w.operator_org_id=$2`, f.entity_id, m!.org_id)));
   if (f.kind === 'intake_evidence' && m && m.org_kind !== 'kitovu')

@@ -104,7 +104,7 @@ export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
     <Page c={c} title={f.full_name}>
       <div className="head">
         <h1>{f.full_name} <small className="mono">{f.code}</small></h1>
-        <Level n={f.kyc_level} />
+        <span><Level n={f.kyc_level} />{c.membership?.org_kind !== 'lender' && <> <a className="button" href={`/farmers/${f.code}/statement`}>Statement</a></>}</span>
       </div>
       {f.status !== 'active' && <p className="flash info">This record is {f.status}.</p>}
 
