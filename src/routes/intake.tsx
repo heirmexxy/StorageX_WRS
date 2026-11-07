@@ -6,6 +6,9 @@ import { screenIntake } from '../lib/agents/intake-screen';
 import { render } from '../views/layout';
 import { IntakesPage, IntakePage } from '../views/intake';
 import { act } from './admin';
+import { can } from '../lib/rbac';
+import { db } from '../lib/db';
+import { issuable, blockers } from '../lib/receipts';
 
 /** JSON endpoints for the gate app: user mistakes come back as {error}, never as an HTML page. */
 async function api(c: Ctx, fn: () => Promise<unknown>) {
@@ -44,7 +47,11 @@ get('/intakes', 'perm:stock.manage', async (c) => {
 get('/intakes/:ref', 'perm:stock.manage', async (c) => {
   const i = await I.intakeByRef(c.actor, c.params.ref);
   if (!i) throw new HttpError(404, 'No delivery with that reference.');
-  c.html(render(<IntakePage c={c} i={i} />));
+  const issue = c.membership?.org_kind === 'kitovu' && can(c.membership, 'receipts.issue') || i.status === 'accepted'
+    ? { blockers: can(c.membership, 'receipts.issue') && c.membership?.org_kind === 'kitovu' ? blockers((await issuable(i.id))!, c.actor) : ['Receipts are issued by Kitovu.'],
+        receipts: await db.all(`SELECT receipt_no, net_weight_kg, status::text FROM receipts WHERE intake_id=$1 ORDER BY lot_no`, i.id) }
+    : undefined;
+  c.html(render(<IntakePage c={c} i={i} issue={issue} />));
 });
 post('/intakes/:ref/review', 'perm:stock.manage', (c) => act(c, `/intakes/${c.params.ref}`, async () => {
   const d = c.body.decision === 'accept' ? 'accept' : c.body.decision === 'reject' ? 'reject' : 'hold';

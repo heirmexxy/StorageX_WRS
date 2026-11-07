@@ -14,6 +14,7 @@ const NAV: { href: string; label: string; perm?: Permission; kitovu?: boolean }[
   { href: '/review', label: 'Review queue', perm: 'farmers.edit', kitovu: true },
   { href: '/field-partners', label: 'Field partners', perm: 'field_partners.manage' },
   { href: '/intakes', label: 'Deliveries', perm: 'stock.manage' },
+  { href: '/receipts', label: 'Receipts', perm: 'receipts.view' },
   { href: '/warehouses', label: 'Warehouses', perm: 'warehouses.view' },
   { href: '/admin/applications', label: 'Applications', perm: 'orgs.manage' },
   { href: '/admin/people', label: 'People', perm: 'users.manage' },

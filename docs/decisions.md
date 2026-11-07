@@ -2,6 +2,17 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-07 (Build 4)
+
+1. **Receipts come only from accepted deliveries**, issued by Kitovu staff with receipt-issuing rights who did not record the delivery. Blocked when the farmer is not identity-checked (level 1), the warehouse is not certified or active, the warehouse is Tier D, or moisture is above the crop's limit (dry, re-test, record again).
+2. **A delivery can be split into up to 10 receipts** (equal parts or given weights) so a farmer can pledge or sell part of the stock. Weights and bags must add up exactly.
+3. **Receipt facts are frozen in the database; changes of state are events in a hash chain.** `receipt_events_verify()` recomputes the chain; the receipt page and the public page show the result. Only status, ownership, closing details, valuation and the distribution switch can change, and each change is an event.
+4. **Receipts are signed with Ed25519** over number, verify token, commodity, net weight, warehouse and issue time. The key is derived from `APP_SECRET`; the public key is at `/.well-known/storagex-receipt-key.json` so partners (ComboTrader, TradeChainX, lenders) can check a QR offline. Changing `APP_SECRET` changes the key, so treat it as permanent.
+5. **The Receipt Passport (`/r/<token>`) is public**: live status in plain words, produce, weight, warehouse, insurance on record, owner as initials and farmer code only, and the event history without names. If the QR's signature does not match, or the history fails its check, the page says so in red. The token is random, never the receipt number. Rate-limited, not indexed.
+6. **The PDF is a copy, not the receipt.** It says so, shows the status at printing and carries the QR. Every print is logged.
+7. **Cancelling** is only for a receipt still `issued` (no loan or sale), by someone other than the issuer, with a reason that stays internal.
+8. **Lenders see receipts of farmers who consented to them** (pledged receipts join in Build 7); warehouse operators see their warehouses' receipts; networks and co-operatives see their farmers'.
+
 ## 2026-11-07 (Build 3)
 
 1. **The gate app is a web page installed from the browser, not a Play Store app.** It is written in plain ES5 JavaScript (checked in CI-able form with esbuild's ES5 target) using XMLHttpRequest, IndexedDB, FileReader and canvas, so it runs on old Android phones. A service worker lets it reopen without network where the browser supports one (Chrome 40+); on older browsers the page keeps working while it stays open. Opera Mini's server-side mode cannot run it.

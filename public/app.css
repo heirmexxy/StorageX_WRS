@@ -115,3 +115,15 @@ img.mini { width: 90px; height: 64px; object-fit: cover; border-radius: 6px; bor
 .gallery figcaption { font-size: 12px; color: var(--muted); }
 .bad { color: var(--bad); font-weight: 600; }
 .flaglist li { display: block; }
+.center { text-align: center; }
+.qr svg { max-width: 100%; height: auto; }
+.passport { border-top: 6px solid var(--muted); }
+.passport.tone-ok { border-top-color: var(--ok); }
+.passport.tone-warn { border-top-color: var(--warn); }
+.passport.tone-bad { border-top-color: var(--bad); }
+.passport .status { font-size: 26px; font-weight: 700; margin: 4px 0; }
+.passport.tone-ok .status { color: var(--ok); }
+.passport.tone-warn .status { color: var(--warn); }
+.passport.tone-bad .status { color: var(--bad); }
+.hist { padding-left: 20px; }
+.ok { color: var(--ok); }

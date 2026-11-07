@@ -15,6 +15,7 @@ import './routes/auth';
 import './routes/admin';
 import './routes/registry';
 import './routes/intake';
+import './routes/receipts';
 
 const CSP = ["default-src 'self'", "img-src 'self' data:", "style-src 'self'", "script-src 'self'", "form-action 'self'", "frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'"].join('; ');
 const STATIC: Record<string, string> = {

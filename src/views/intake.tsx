@@ -44,7 +44,7 @@ export function IntakesPage({ c, rows, q }: { c: Ctx; rows: any[]; q: Record<str
   );
 }
 
-export function IntakePage({ c, i }: { c: Ctx; i: any }) {
+export function IntakePage({ c, i, issue }: { c: Ctx; i: any; issue?: { blockers: string[]; receipts: any[] } }) {
   const kitovu = c.membership?.org_kind === 'kitovu';
   const photo = (sha: string) => i.photos.find((p: any) => p.sha256 === sha);
   const ai = i.ai_check;
@@ -119,8 +119,24 @@ export function IntakePage({ c, i }: { c: Ctx; i: any }) {
               <button name="decision" value="reject" className="danger">Reject</button>
             </form>
           ))}
-        <p className="muted small">Accepting confirms the stock is in the warehouse as recorded. Receipts are issued from accepted deliveries (next build). Records cannot be edited: reject a wrong one and record it again.</p>
+        <p className="muted small">Accepting confirms the stock is in the warehouse as recorded. Records cannot be edited: reject a wrong one and record it again.</p>
       </section>
+      {issue && (
+        <section className="card">
+          <h2>Receipt</h2>
+          {issue.receipts.length > 0 && <ul>{issue.receipts.map((r: any) => <li key={r.receipt_no}><a className="mono" href={`/receipts/${r.receipt_no}`}>{r.receipt_no}</a>{` · ${kg(r.net_weight_kg)} · ${r.status}`}</li>)}</ul>}
+          {issue.blockers.length > 0
+            ? <ul className="flaglist">{issue.blockers.map((b) => <li key={b} className="review">{b}</li>)}</ul>
+            : (
+              <form method="post" action={`/intakes/${i.ref}/issue`} className="row">
+                <Csrf c={c} />
+                <input name="split" placeholder="One receipt, or split: a number (e.g. 2) or weights (e.g. 500, 500.5)" aria-label="Split" />
+                <button className="primary">Issue receipt</button>
+              </form>
+            )}
+          <p className="muted small">Splitting lets the farmer pledge or sell part of the stock. The farmer gets a text with the receipt number and a link to check it.</p>
+        </section>
+      )}
     </Page>
   );
 }

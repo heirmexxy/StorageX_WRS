@@ -20,6 +20,8 @@ import * as K from '../src/lib/kyc';
 import * as P from '../src/lib/applications';
 import * as S from '../src/lib/settings';
 import * as I from '../src/lib/intake';
+import * as Rc from '../src/lib/receipts';
+import { verify as sigVerify } from '../src/lib/sign';
 import { screenIntake } from '../src/lib/agents/intake-screen';
 import vm from 'node:vm';
 import { transformSync } from 'esbuild';
@@ -524,6 +526,75 @@ async function main() {
     await rejects(I.ingest(clerk2, JSON.stringify(rec), r.files));
   });
 
+  console.log('\nReceipts and the Receipt Passport');
+  await t('splitting a delivery into lots keeps every kilo and bag', () => {
+    eq(Rc.lotsFor(1000.5, 10, ''), [{ kg: 1000.5, bags: 10 }]);
+    const two = Rc.lotsFor(1000.5, 10, '2'); eq(two.map((l) => l.kg), [500.25, 500.25]); eq(two[0].bags + two[1].bags, 10);
+    const three = Rc.lotsFor(1000, 7, '3'); eq(Math.round(three.reduce((s, l) => s + l.kg, 0) * 100) / 100, 1000); eq(three.reduce((s, l) => s + l.bags, 0), 7);
+    eq(Rc.lotsFor(1000.5, 10, '600, 400.5').map((l) => l.kg), [600, 400.5]);
+    let threw = false; try { Rc.lotsFor(1000.5, 10, '600, 400'); } catch { threw = true; } ok(threw, 'weights must add up');
+    threw = false; try { Rc.lotsFor(100, 2, '3'); } catch { threw = true; } ok(threw, 'not more receipts than bags');
+  });
+  const accepted = (await db.get<{ id: string }>('SELECT id FROM intakes WHERE ref=$1', firstRef))!;
+  let rno = '', rno2 = '';
+  await t('issue: never by the clerk, only from accepted deliveries, once', async () => {
+    await rejects(Rc.issueFromIntake(ops, accepted.id));
+    const heldId = await db.val<string>(`SELECT id FROM intakes WHERE status='held' LIMIT 1`);
+    await rejects(Rc.issueFromIntake(admin, heldId!));
+    await rejects(Rc.issueFromIntake(officer, accepted.id));
+    const r = await Rc.issueFromIntake(admin, accepted.id, '2');
+    eq(r.receipts.length, 2); rno = r.receipts[0].no; rno2 = r.receipts[1].no;
+    ok(/^SX-NI-MNA-\d{6}-0001$/.test(rno), rno); ok(rno2.endsWith('-0002'));
+    eq(Number(await db.val(`SELECT sum(net_weight_kg) FROM receipts WHERE intake_id=$1`, accepted.id)), 1000.5);
+    await rejects(Rc.issueFromIntake(admin, accepted.id));
+  });
+  await t('receipt facts are signed, frozen, and the history chain verifies', async () => {
+    const r = (await Rc.receiptByNo(admin, rno))!;
+    ok(sigVerify(Rc.signedFacts(r), r.signature!));
+    ok(!sigVerify(Rc.signedFacts({ ...r, net_weight_kg: '9999' }), r.signature!), 'changed weight breaks the signature');
+    await rejects(db.run(`UPDATE receipts SET net_weight_kg=9999 WHERE id=$1`, r.id));
+    await rejects(db.run(`DELETE FROM receipts WHERE id=$1`, r.id));
+    await rejects(db.run(`UPDATE receipt_events SET data='{}' WHERE receipt_id=$1`, r.id));
+    ok(await Rc.chainOk(r.id));
+    // Someone with database owner rights bypasses the guard: the chain check still catches it.
+    await db.run('ALTER TABLE receipt_events DISABLE TRIGGER receipt_events_append_only');
+    await db.run(`UPDATE receipt_events SET data = data || '{"net_kg": 5000}' WHERE receipt_id=$1`, r.id);
+    ok(!(await Rc.chainOk(r.id)), 'tampering detected');
+    const p = await Rc.passport(r.verify_token, undefined, '7.7.7.7');
+    eq(p!.chain_ok, false);
+    await db.run(`UPDATE receipt_events SET data = data - 'net_kg' WHERE receipt_id=$1`, r.id);
+    await db.run(`UPDATE receipt_events SET data = data || jsonb_build_object('net_kg', 500.25) WHERE receipt_id=$1`, r.id);
+    await db.run('ALTER TABLE receipt_events ENABLE TRIGGER receipt_events_append_only');
+    ok(await Rc.chainOk(r.id), 'restored');
+  });
+  await t('Receipt Passport: public facts, QR signature check, no personal details', async () => {
+    const r = (await Rc.receiptByNo(admin, rno))!;
+    const p = (await Rc.passport(r.verify_token, r.signature!, '7.7.7.7'))!;
+    eq(p.view.label, 'Valid'); eq(p.qr_sig, 'match'); eq(p.signature_ok, true); eq(p.lot, '1 of 2');
+    ok(p.owner.startsWith('A. O.'), p.owner); ok(!JSON.stringify(p).includes('+234'));
+    eq((await Rc.passport(r.verify_token, r.signature!.replace(/^./, (x) => (x === 'A' ? 'B' : 'A')), '7.7.7.7'))!.qr_sig, 'mismatch');
+    eq(await Rc.passport('0'.repeat(32), undefined, '7.7.7.7'), null);
+  });
+  await t('cancel: by someone other than the issuer; the public page says Cancelled', async () => {
+    await rejects(Rc.cancelReceipt(admin, rno2, 'Issued in error during testing'));
+    await rejects(Rc.cancelReceipt(ops, rno2, 'short'));
+    await Rc.cancelReceipt(ops, rno2, 'Issued in error during testing');
+    const r = (await Rc.receiptByNo(admin, rno2))!;
+    eq((await Rc.passport(r.verify_token, undefined, '7.7.7.7'))!.view.label, 'Cancelled');
+    eq((await Rc.eventsOf(r.id)).map((e) => e.event_type), ['issued', 'cancelled']);
+    ok(await Rc.chainOk(r.id));
+  });
+  await t('who sees receipts: Kitovu all, lenders only with the farmer’s consent', async () => {
+    ok((await Rc.listReceipts(admin)).some((r) => r.receipt_no === rno));
+    eq((await Rc.listReceipts(officer)).length, 0);
+    await K.sendConsentCode(ops, ada, accionId); await K.recordConsent(ops, ada, { org_id: accionId, method: 'sms_code', otp: lastCode(), read_aloud: '1' });
+    ok((await Rc.listReceipts(officer)).some((r) => r.receipt_no === rno));
+  });
+  await t('printable PDF', async () => {
+    const { pdf } = await Rc.receiptPdf(admin, rno);
+    ok(pdf.subarray(0, 5).toString() === '%PDF-' && pdf.includes(Buffer.from(rno)) && pdf.toString('latin1').trimEnd().endsWith('%%EOF'));
+  });
+
   console.log('\nPartner applications');
   await t('public application → approve creates the org and an admin invitation', async () => {
     eq(await P.submitApplication({ kind: 'lender', org_name: 'Bot Bank', contact_name: 'Bot', email: 'b@b.co', phone: '08011112222', agree: '1', website: 'http://spam' }, '9.9.9.9'), 'spam');
@@ -661,6 +732,13 @@ async function main() {
     eq(bad.status, 400); ok(((await bad.json()) as any).error);
     const page = await req('GET', `/intakes/${uj.ref}`); eq(page.status, 200); ok(page.text.includes('Weighings'));
     delete jar.sx_sid;
+  });
+
+  await t('Receipt Passport and signing key are public', async () => {
+    const r = (await Rc.receiptByNo(admin, rno))!;
+    const pg = await req('GET', `/r/${r.verify_token}?s=${r.signature}`); eq(pg.status, 200); ok(pg.text.includes('Valid') && pg.text.includes(rno));
+    eq((await req('GET', `/r/${'f'.repeat(32)}`)).status, 404);
+    const k = await req('GET', '/.well-known/storagex-receipt-key.json'); eq(k.status, 200); ok(JSON.parse(k.text).keys[0].crv === 'Ed25519');
   });
   server.close();
 
