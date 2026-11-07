@@ -2,6 +2,12 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-07 (Landing page)
+
+1. **The public home page is a StoryBrand page for lenders.** Hero: the lender. Problem: three questions rural lending cannot answer (is the stock there, has someone else lent against it, what is it worth today), and the farmer selling at harvest as the reason it matters. Guide: Kitovu, with the specific controls as authority rather than slogans. Plan: three steps. Calls to action: "Apply to partner" (direct) and "See a sample receipt" (transitional). Stakes and success side by side. Short sections for warehouse owners, networks and farmers.
+2. **No claims we cannot back.** No partner logos, statistics or testimonials until they are real and agreed; the hero receipt is labelled as an illustration and `/sample-receipt` as a sample.
+3. Plain CSS, no web fonts or scripts (fast on weak networks, nothing third-party). Signed-in people at `/` go to their home page.
+
 ## 2026-11-07 (Build 7)
 
 1. **Any lender, Kitovu included.** Lenders (and Kitovu, lending from its own balance sheet) define products: interest per month (simple, daily), one-off fee, tenor, amount range, crops, the identity level needed before disbursement (default level 2: account opened with the lender), and warning and liquidation levels for loan ÷ stock value.

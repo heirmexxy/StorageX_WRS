@@ -952,6 +952,11 @@ async function main() {
     delete jar.sx_sid;
   });
 
+  await t('landing page and sample receipt are public; signed-in staff go to their home', async () => {
+    const lp = await req('GET', '/'); eq(lp.status, 200); ok(lp.text.includes('Lend against grain you can check') && lp.text.includes('/apply'));
+    const sm = await req('GET', '/sample-receipt'); eq(sm.status, 200); ok(sm.text.includes('not a real receipt'));
+    await signInAs(ops); eq((await req('GET', '/')).location, '/app'); delete jar.sx_sid;
+  });
   await t('Receipt Passport and signing key are public', async () => {
     const r = (await Rc.receiptByNo(admin, rno))!;
     const pg = await req('GET', `/r/${r.verify_token}?s=${r.signature}`); eq(pg.status, 200); ok(pg.text.includes('Closed') && pg.text.includes(rno));

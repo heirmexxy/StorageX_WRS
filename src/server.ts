@@ -22,7 +22,7 @@ import './routes/loans';
 
 const CSP = ["default-src 'self'", "img-src 'self' data:", "style-src 'self'", "script-src 'self'", "form-action 'self'", "frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'"].join('; ');
 const STATIC: Record<string, string> = {
-  '/app.css': 'text/css; charset=utf-8', '/favicon.ico': 'image/x-icon',
+  '/app.css': 'text/css; charset=utf-8', '/landing.css': 'text/css; charset=utf-8', '/favicon.ico': 'image/x-icon',
   // The gate app (Build 3): a static shell that works offline; data comes from /api/intake.
   '/intake/': 'text/html; charset=utf-8', '/intake/app.js': 'application/javascript; charset=utf-8', '/intake/sw.js': 'application/javascript; charset=utf-8',
   '/intake/intake.css': 'text/css; charset=utf-8', '/intake/manifest.webmanifest': 'application/manifest+json', '/intake/icon-192.png': 'image/png', '/intake/icon-512.png': 'image/png',

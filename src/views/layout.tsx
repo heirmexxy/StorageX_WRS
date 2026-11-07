@@ -39,7 +39,7 @@ export function Page({ c, title, children, bare, wide }: { c: Ctx; title: string
       </head>
       <body className={[bare && 'bare', wide && 'wide'].filter(Boolean).join(' ')}>
         <header className="top">
-          <a className="brand" href={s ? '/app' : '/login'}>StorageX <span>WRS</span></a>
+          <a className="brand" href={s ? '/app' : '/'}>StorageX <span>WRS</span></a>
           {s && (
             <nav>
               {NAV.filter((n) => (!n.perm || can(s.active, n.perm)) && (!n.kitovu || s.active?.org_kind === 'kitovu')).map((n) => (

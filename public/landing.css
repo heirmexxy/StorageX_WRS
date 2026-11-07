@@ -1,0 +1,95 @@
+/* StorageX landing page. Concrete floor, ink, StorageX green, and maize-yellow stencil paint for the one stamp. */
+:root {
+  --concrete: #e9eae5; --sack: #fbfbf8; --ink: #17211b; --soft: #4e5a52; --green: #1f6b45; --green-deep: #154d32; --maize: #e8b21e; --rule: #cfd3cb;
+  --cond: "Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", "Helvetica Neue", sans-serif-condensed, system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body.lp { margin: 0; background: var(--concrete); color: var(--ink); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.lp a { color: var(--green-deep); }
+.lp a:focus-visible, .lp-btn:focus-visible { outline: 3px solid var(--maize); outline-offset: 3px; }
+.skip { position: absolute; left: -9999px; } .skip:focus { left: 12px; top: 12px; background: var(--sack); padding: 8px 12px; z-index: 10; }
+h1, h2, h3 { font-family: var(--cond); font-stretch: condensed; line-height: 1.05; letter-spacing: -0.01em; margin: 0; }
+main > section { padding: 72px max(24px, calc((100vw - 1120px) / 2)); }
+
+.lp-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 18px max(24px, calc((100vw - 1120px) / 2)); }
+.lp-brand { font-family: var(--cond); font-weight: 800; font-size: 26px; text-decoration: none; color: var(--ink) !important; }
+.lp-brand span { font-weight: 500; color: var(--soft); font-size: 18px; }
+.lp-top nav { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; font-size: 15px; }
+.lp-top nav a { text-decoration: none; color: var(--ink); }
+.lp-btn { display: inline-block; background: var(--green); color: #fff !important; text-decoration: none; padding: 10px 18px; border-radius: 4px; font-weight: 600; }
+.lp-btn:hover { background: var(--green-deep); }
+.lp-btn.big { font-size: 18px; padding: 14px 24px; }
+.lp-link { font-weight: 600; }
+
+.hero { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 56px; align-items: center; padding-top: 40px !important; }
+.hero h1 { font-size: clamp(48px, 7.4vw, 96px); font-weight: 800; max-width: 12.5ch; }
+.lead { font-size: 20px; max-width: 38em; color: var(--soft); margin: 24px 0 32px; }
+.ctas { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+
+/* The stack card: what a painted card on a grain stack looks like, made into a receipt. */
+.stackcard { margin: 0; background: var(--sack); border: 2px solid var(--ink); padding: 26px 28px 20px; position: relative; box-shadow: 10px 10px 0 var(--green); transform: rotate(-1.2deg); }
+.sc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 2px solid var(--ink); padding-bottom: 14px; margin-bottom: 14px; }
+.sc-no { font-family: var(--cond); font-weight: 700; font-size: 20px; letter-spacing: 0.02em; }
+.stamp { font-family: var(--cond); font-weight: 800; font-size: 34px; color: var(--ink); background: var(--maize); padding: 2px 14px; border: 3px solid var(--ink); transform: rotate(6deg); animation: stamp 0.5s cubic-bezier(.2,1.6,.4,1) 0.6s both; }
+@keyframes stamp { from { transform: rotate(6deg) scale(2.2); opacity: 0; } to { transform: rotate(6deg) scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .stamp { animation: none; } html { scroll-behavior: auto; } }
+.stackcard dl { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; }
+.stackcard dt { font-size: 13px; color: var(--soft); }
+.stackcard dd { margin: 0; font-family: var(--cond); font-weight: 700; font-size: 20px; line-height: 1.25; }
+.sc-hist { margin: 18px 0 10px; padding: 14px 0 0 22px; border-top: 1px dashed var(--rule); font-size: 15px; }
+.sc-hist li { margin-bottom: 4px; }
+.sc-hist li::marker { color: var(--green); font-weight: 700; }
+.stackcard figcaption { font-size: 13px; color: var(--soft); }
+
+.problem { background: var(--sack); }
+.problem h2, .guide h2, .plan h2, .others h2, .final h2 { font-size: clamp(32px, 4.4vw, 52px); font-weight: 800; max-width: 20ch; margin-bottom: 32px; }
+.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; }
+.three h3 { font-size: 26px; margin-bottom: 10px; }
+.three p { margin: 0; color: var(--soft); max-width: 34em; }
+.why { margin: 44px 0 0; font-size: 21px; max-width: 40em; border-left: 6px solid var(--maize); padding-left: 20px; }
+
+.guide { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 56px; }
+.guide-copy p { color: var(--soft); max-width: 34em; }
+.controls { list-style: none; margin: 0; padding: 0; }
+.controls li { padding: 14px 0; border-top: 1px solid var(--rule); max-width: 40em; }
+.controls li:last-child { border-bottom: 1px solid var(--rule); }
+.controls b { display: block; font-family: var(--cond); font-size: 22px; }
+
+.plan { background: var(--green-deep); color: #eef3ef; }
+.plan h2 { color: #fff; }
+.steps { list-style: none; counter-reset: s; display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; padding: 0; margin: 0 0 40px; }
+.steps li { counter-increment: s; border-top: 3px solid var(--maize); padding-top: 18px; }
+.steps li::before { content: counter(s); font-family: var(--cond); font-weight: 800; font-size: 56px; line-height: 1; color: var(--maize); display: block; margin-bottom: 10px; }
+.steps h3 { font-size: 26px; color: #fff; margin-bottom: 8px; }
+.steps p { margin: 0; color: #cfe0d5; }
+.plan .lp-btn { background: var(--maize); color: var(--ink) !important; }
+.plan .lp-btn:hover { background: #f2c544; }
+
+.stakes { display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding-top: 0 !important; padding-bottom: 0 !important; }
+.stakes .col { padding: 64px 40px; }
+.stakes h2 { font-size: 34px; font-weight: 800; margin-bottom: 18px; }
+.stakes ul { margin: 0; padding-left: 20px; }
+.stakes li { margin-bottom: 10px; }
+.without { background: #dcdcd5; color: var(--soft); }
+.with { background: var(--sack); }
+.with li::marker { color: var(--green); }
+
+.final { background: var(--ink); color: #e9ece7; }
+.final h2 { color: #fff; margin-bottom: 16px; }
+.final p { max-width: 36em; color: #c3cbc5; margin: 0 0 28px; }
+.lp-foot { padding: 28px max(24px, calc((100vw - 1120px) / 2)); font-size: 14px; color: var(--soft); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.lp-foot p { margin: 0; }
+.lp-foot a { margin-left: 16px; }
+
+@media (max-width: 860px) {
+  main > section { padding-top: 52px; padding-bottom: 52px; }
+  .hero, .guide, .stakes { grid-template-columns: 1fr; }
+  .hero { gap: 40px; }
+  .stackcard { transform: none; box-shadow: 6px 6px 0 var(--green); }
+  .three, .steps { grid-template-columns: 1fr; gap: 28px; }
+  .stakes .col { padding: 44px 24px; }
+  .lp-top nav { gap: 14px; }
+  .lp-top nav a:not(.lp-btn):not([href="/login"]) { display: none; }
+  .lp-foot a { margin: 0 16px 0 0; }
+}

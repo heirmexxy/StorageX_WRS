@@ -7,11 +7,24 @@ import { qrDataUri } from '../lib/qr';
 import { render } from '../views/layout';
 import { LoginPage, TwoFactorPage, SetupTwoFactorPage, SetupSmsPage, RecoveryCodesPage, InvitePage, ResetPage } from '../views/auth';
 import { smsAllowed } from '../lib/rbac';
+import { LandingPage } from '../views/landing';
+import { PassportPage } from '../views/receipts';
+
+const SAMPLE = {
+  receipt_no: 'SX-NI-MNA-000000-0000', view: { label: 'Valid — pledged to a lender', tone: 'warn', note: 'The receipt backs a loan. It cannot be sold or pledged again until released.' },
+  commodity: 'Maize', grade: 'A', moisture: '12.5', bags: 10, net_kg: 1000, held_kg: 1000, warehouse: 'Sample Warehouse, Niger State', tier: 'A', insured: true,
+  owner: 'A. D. (SXF-000000)', lot: null, issued_at: new Date('2026-11-02T10:15:00Z'), checked_at: new Date(),
+  events: [{ label: 'Issued', at: new Date('2026-11-02T10:15:00Z') }, { label: 'Pledged to a lender', at: new Date('2026-11-04T09:02:00Z') }, { label: 'Loan paid out', at: new Date('2026-11-04T14:40:00Z') }],
+  chain_ok: true, signature_ok: true, legacy: false, qr_sig: 'match', key_id: 'sample',
+};
 
 const auditActor = (c: Ctx) => ({ userId: c.user?.id ?? null, label: `user:${c.user?.email ?? 'anonymous'}`, ip: c.ip });
 const safeNext = (n: unknown) => (typeof n === 'string' && /^\/(?!\/)[\w\-/?=&.%]*$/.test(n) ? n : '/app');
 
-get('/', 'public', (c) => c.redirect(c.session?.twofaOk ? '/app' : '/login'));
+get('/', 'public', (c) => (c.session?.twofaOk ? c.redirect('/app') : c.html(render(<LandingPage c={c} />))));
+
+// A sample Receipt Passport for the landing page, clearly marked as a sample.
+get('/sample-receipt', 'public', (c) => c.html(render(<PassportPage c={c} p={SAMPLE} sample />)));
 
 get('/login', 'public', (c) => {
   if (c.session?.twofaOk) return c.redirect('/app');

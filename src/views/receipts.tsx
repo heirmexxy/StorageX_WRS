@@ -111,10 +111,11 @@ export function ReceiptPage({ c, r, events, chainOk, url, bal, rels, value }: { 
   );
 }
 
-export function PassportPage({ c, p }: { c: Ctx; p: any }) {
+export function PassportPage({ c, p, sample }: { c: Ctx; p: any; sample?: boolean }) {
   return (
     <Page c={c} title={`Receipt ${p.receipt_no}`} bare wide>
       <section className={`card passport tone-${p.view.tone}`}>
+        {sample && <p className="flash info">This is a sample to show what a receipt page looks like. It is not a real receipt. Real receipts are reached by scanning the QR code on the printed copy or the link texted to the farmer.</p>}
         <p className="muted small">StorageX by Kitovu · Receipt Passport</p>
         <h1 className="mono">{p.receipt_no}</h1>
         <p className="status">{p.view.label}</p>
