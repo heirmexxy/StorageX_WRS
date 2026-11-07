@@ -17,6 +17,7 @@ const NAV: { href: string; label: string; perm?: Permission; kitovu?: boolean }[
   { href: '/receipts', label: 'Receipts', perm: 'receipts.view' },
   { href: '/stock', label: 'Stock', perm: 'stock.manage' },
   { href: '/prices', label: 'Prices', perm: 'finance.view' },
+  { href: '/loans', label: 'Loans', perm: 'finance.view' },
   { href: '/warehouses', label: 'Warehouses', perm: 'warehouses.view' },
   { href: '/admin/applications', label: 'Applications', perm: 'orgs.manage' },
   { href: '/admin/people', label: 'People', perm: 'users.manage' },

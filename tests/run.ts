@@ -23,6 +23,8 @@ import * as I from '../src/lib/intake';
 import * as Rc from '../src/lib/receipts';
 import * as St from '../src/lib/stock';
 import * as V from '../src/lib/valuation';
+import * as F from '../src/lib/finance';
+import { reviewLine } from '../src/lib/agents/batch-review';
 import { verify as sigVerify } from '../src/lib/sign';
 import { screenIntake } from '../src/lib/agents/intake-screen';
 import vm from 'node:vm';
@@ -726,6 +728,89 @@ async function main() {
     const kit = (await V.valuationFor(admin, r))!; eq(kit.policy.own, false); eq(kit.policy.max_ltv_bp, 7000);
     ok(mine.maxLoan! < kit.maxLoan!);
     eq(await V.valuationFor(gateClerk, r), null, 'warehouse staff do not see values');
+  });
+
+  console.log('\nLoans');
+  await t('interest: simple, daily, on principal outstanding; payments go to fees, interest, then principal', () => {
+    const ln = { interest_bp_month: 300, disbursed_on: '2026-01-01', due_on: '2026-04-01' };
+    const e = [{ kind: 'disbursement', amount_kobo: 10_000_000, on_date: '2026-01-01' }, { kind: 'fee', amount_kobo: 100_000, on_date: '2026-01-01' }];
+    const p30 = F.position(ln, e, new Date('2026-01-31T12:00:00Z'));
+    eq(p30.interest, 300_000); eq(p30.outstanding, 10_400_000);
+    const p = F.position(ln, [...e, { kind: 'repayment', amount_kobo: 5_400_000, on_date: '2026-01-31' }], new Date('2026-03-02T12:00:00Z'));
+    eq(p.principalOut, 5_000_000); eq(p.interest, 450_000, 'second month on half the principal'); eq(p.outstanding, 5_150_000);
+    eq(F.position(ln, e, new Date('2026-04-11T12:00:00Z')).overdueDays, 10);
+  });
+  const lfin = await makeUser(admin, 'fin2@accion.test', accionId, 'lender_admin');
+  const officer2 = await makeUser(admin, 'credit2@accion.test', accionId, 'credit_officer');
+  let batchRef = '', loanNo = '';
+  await t('lenders define products; Kitovu prepares a batch; amounts capped by the lender’s policy', async () => {
+    await rejects(F.createProduct(officer, { name: 'X', interest_pct_month: '2', tenor_days: '90', max_naira: '1000000' }));
+    await rejects(F.createProduct(lfin, { name: 'Bad', interest_pct_month: '20', tenor_days: '90', max_naira: '1000000' }));
+    await F.createProduct(lfin, { name: 'Harvest 90', interest_pct_month: '3', fee_pct: '1', tenor_days: '90', min_naira: '10000', max_naira: '2000000', commodities: 'MAZ' });
+    const prod = (await F.productsOf(accionId))[0];
+    await rejects(F.createBatch(officer, prod.id));
+    const b = await F.createBatch(ops, prod.id); batchRef = b.ref;
+    await rejects(F.addLine(ops, b.id, { farmer: ada, receipts: liveNo, amount: '99999999' }));
+    const r = await F.addLine(ops, b.id, { farmer: ada, receipts: liveNo });
+    ok(r.amount > 0 && r.amount <= r.max);
+    const b2 = await F.createBatch(ops, prod.id);
+    await rejects(F.addLine(ops, b2.id, { farmer: ada, receipts: liveNo }));
+  });
+  await t('the batch reviewer adds checks (and an AI note when switched on); it never decides', async () => {
+    const b = (await F.batchView(ops, batchRef))!;
+    await F.submitBatch(ops, b.id, (id) => reviewLine(id, null));
+    const line = (await F.batchView(officer, batchRef))!.lines[0];
+    ok(line.review.checks.some((k: any) => k.code === 'identity' && k.result === 'warn'), 'level 1 < product level 2');
+    ok(line.review.checks.some((k: any) => k.code === 'consent' && k.result === 'ok'));
+    eq(line.review.note, null);
+    let saw = '';
+    const r = await reviewLine(line.id, async (_s, content: any) => { saw = content[0].text; return { text: 'Stock and prices look consistent; confirm the account before paying out.', tin: 1, tout: 1 }; });
+    ok(saw.includes('identity') && r.note!.startsWith('Stock')); eq(line.status, 'pending');
+    eq((await F.batchView(lfin, batchRef))!.status, 'submitted');
+  });
+  await t('approval pledges the receipts; a receipt can never carry two liens', async () => {
+    const line = (await F.batchView(officer, batchRef))!.lines[0];
+    await rejects(F.decideLine(ops, line.id, true, {}));
+    await rejects(F.decideLine(other, line.id, true, {}));
+    await F.decideLine(officer, line.id, true, {});
+    loanNo = (await F.batchView(officer, batchRef))!.lines[0].loan_no;
+    const r = (await Rc.receiptByNo(admin, liveNo))!;
+    eq(r.status, 'pledged');
+    await rejects(db.run(`INSERT INTO liens (receipt_id, loan_id, lender_org_id, previous_status) SELECT receipt_id, loan_id, lender_org_id, 'issued' FROM liens WHERE receipt_id=$1`, r.id));
+    await rejects(St.orderRelease(ops, liveNo, { reason: 'owner_withdrawal', collector_name: 'Ada Okafor' }));
+    ok((await Rc.listReceipts(officer)).some((x) => x.receipt_no === liveNo));
+    eq((await Rc.passport(r.verify_token, undefined, '9.9.9.9'))!.view.label, 'Valid — pledged to a lender');
+  });
+  await t('disbursement: by a different lender person, only once the farmer is at the product’s identity level', async () => {
+    await rejects(F.disburse(officer, loanNo, { reference: 'TRF-001122' }));
+    await rejects(F.disburse(officer2, loanNo, { reference: 'TRF-001122' }));
+    await K.lenderVerify(officer, ada, 'ACC-CIF-77001');
+    await rejects(F.disburse(officer2, loanNo, { reference: '0123456789' }));
+    await F.disburse(officer2, loanNo, { reference: 'TRF-001122' });
+    eq((await Rc.receiptByNo(admin, liveNo))!.status, 'financed');
+    const csv = await F.ncrCsv(lfin);
+    ok(csv.includes(loanNo) && csv.includes(liveNo) && csv.includes('ACC-CIF-77001'));
+    await rejects(F.ncrCsv(gateClerk));
+  });
+  await t('repayment closes the loan and releases the receipts with their history intact', async () => {
+    const ln = (await F.loanView(officer, loanNo))!;
+    ok(ln.pos!.outstanding > ln.principal, 'fee added');
+    await rejects(F.repay(officer, loanNo, { amount: '1000', reference: 'R1', kind: 'waiver' }));
+    const part = await F.repay(officer, loanNo, { amount: '1000', reference: 'PAY-1' });
+    eq(part.closed, false);
+    const owed = (await F.loanView(officer, loanNo))!.pos!.outstanding;
+    await rejects(F.repay(officer, loanNo, { amount: String(owed / 100 + 5000), reference: 'PAY-2' }));
+    const done = await F.repay(ops.membership!.org_kind === 'kitovu' ? admin : officer, loanNo, { amount: (owed / 100).toFixed(2), reference: 'PAY-2' });
+    eq(done.closed, true);
+    const r = (await Rc.receiptByNo(admin, liveNo))!;
+    eq(r.status, 'issued');
+    ok((await Rc.eventsOf(r.id)).map((e) => e.event_type).join(',').endsWith('pledged,financed,lien_released'));
+    ok(await Rc.chainOk(r.id));
+    await rejects(db.run('UPDATE loan_entries SET amount_kobo=1'));
+  });
+  await t('Kitovu can lend from its own balance sheet with the same controls', async () => {
+    await F.createProduct(admin, { name: 'Kitovu bridge 60', interest_pct_month: '2.5', tenor_days: '60', max_naira: '500000', min_kyc_level: '1' });
+    ok((await F.activeProducts()).some((p) => p.lender_code === 'KITOVU'));
   });
 
   console.log('\nPartner applications');

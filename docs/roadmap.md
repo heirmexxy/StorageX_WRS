@@ -11,11 +11,11 @@ Each build ends with a check that proves it works. Gates are joint reviews with 
 | 4 | Receipt ledger, Receipt Passport (signed QR, verify page, PDF), split receipts, cancel | A scanned receipt shows its true status; history cannot be edited | Done (Nov 2026) |
 | 5 | Stock control: stacks, ledger, releases, adjustments, counts, reconciliation, under-review switch | Physical counts reconcile to receipts | Done (Nov 2026) |
 | 6 | Valuation: price sources with approval, median reference prices, lender policies (haircut, LTV), daily revaluation | Every receipt has a dated, explainable value | Done (Nov 2026) |
-| 7 | Finance engine for any lender (Kitovu included): products, batches, lien lock, disbursement, NCR data | Two lenders fund receipts; no receipt is pledged twice | Next |
-| 8 | Settlement: sale, collection matching, waterfall, statements, lien release | One full cycle from delivery to farmer balance paid | |
+| 7 | Finance engine for any lender (Kitovu included): products, batches with the batch reviewer agent, lien lock, approval and disbursement by different people, repayments, margin watch, NCR file | Two lenders fund receipts; no receipt is pledged twice | Done (Nov 2026) |
+| 8 | Settlement: sale, collection matching, waterfall, statements, lien release | One full cycle from delivery to farmer balance paid | Next |
 | 9 | Lender control tower | The lender runs a dry run alone | |
 | 10 | Farmer SMS and USSD status | Farmers know what is happening without calling | |
-| 11 | Agents: intake inspector, batch reviewer, data steward | Suspicious intakes are held before issue | |
+| 11 | Agents: intake inspector, data steward (batch reviewer done in Build 7) | Suspicious intakes are held before issue | |
 | 12 | Pilot hardening: security review, DPIA, off-site backups, UAT, SOPs | **Gate: pilot launch** | |
 | 13–16 | WareGuard link, collateral watch, farmer assistant, lender and compliance agents | Gate: pilot review | |
 | 17–21 | Partner warehouses, distribution API, ComboTrader pilot, buyer desk, second lender | Gate: second lender live | |

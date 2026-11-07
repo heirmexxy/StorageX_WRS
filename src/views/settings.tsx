@@ -30,6 +30,9 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats }: { c: Ctx; s: 
           <label className="field"><span>{LABELS['intake.ai_check']}</span>
             <select name="intake.ai_check" defaultValue={s['intake.ai_check']}><option value="assist">On: flag deliveries whose photos disagree with the typed numbers</option><option value="off">Off</option></select>
           </label>
+          <label className="field"><span>{LABELS['loans.ai_note']}</span>
+            <select name="loans.ai_note" defaultValue={s['loans.ai_note']}><option value="assist">On: add a note to each loan request</option><option value="off">Off (checks still run)</option></select>
+          </label>
           {serverAiOff && <p className="flash info">Switched off in the server settings file (KYC_AI_MODE=off), which overrides this.</p>}
           {!hasKey && <p className="flash info">No ANTHROPIC_API_KEY on this server yet, so the pre-check is skipped.</p>}
           <p className="small">{screened ? `Reviewers agreed with the AI flag on ${stats.agreed} and disagreed on ${stats.disagreed} of ${screened} decided checks (amber flags are not counted).` : 'No decided checks with an AI flag yet.'}</p>

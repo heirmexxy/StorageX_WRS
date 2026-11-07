@@ -15,6 +15,8 @@ export const DEFAULTS = {
   'kyc.ai_mode': 'assist' as 'assist' | 'off',
   /** AI reads the scale and moisture-meter photos of each delivery and compares them with the typed numbers. */
   'intake.ai_check': 'assist' as 'assist' | 'off',
+  /** AI writes a short note on each loan request for the lender's credit officer, from the automatic checks. */
+  'loans.ai_note': 'assist' as 'assist' | 'off',
   /** Counts may fall short of what receipts claim by this much before it is a serious flag. */
   'stock.tolerance_pct': 1,
   /** Every stack holding stock should be counted at least this often. */
@@ -37,6 +39,7 @@ export const LABELS: Record<SettingKey, string> = {
   'phone_check.attested': 'Allow witnessed attestation for farmers without a working phone',
   'kyc.ai_mode': 'AI pre-check of ID photos for the reviewer',
   'intake.ai_check': 'AI reads scale and moisture-meter photos and compares them with the typed numbers',
+  'loans.ai_note': 'AI writes a note on each loan request for the credit officer',
   'stock.tolerance_pct': 'Allowed shortfall of counted stock against receipts (%)',
   'stock.count_every_days': 'Count every stack at least every (days)',
   'price.window_days': 'Use prices from the last (days)',
@@ -60,7 +63,7 @@ export async function saveSettings(a: Actor, input: Partial<Record<SettingKey, u
     if (!(k in input)) continue;
     const def = DEFAULTS[k];
     if (typeof def === 'boolean') next[k] = input[k] === true || input[k] === '1' || input[k] === 'on';
-    else if (k === 'kyc.ai_mode' || k === 'intake.ai_check') next[k] = input[k] === 'off' ? 'off' : 'assist';
+    else if (k === 'kyc.ai_mode' || k === 'intake.ai_check' || k === 'loans.ai_note') next[k] = input[k] === 'off' ? 'off' : 'assist';
     else if (typeof def === 'number') {
       const v = Number(input[k]);
       const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50] } as Record<string, number[]>)[k] ?? [1, 180];

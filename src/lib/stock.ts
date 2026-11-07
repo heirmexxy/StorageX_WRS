@@ -312,7 +312,7 @@ export async function setUnderReview(a: Actor, whId: string, commodity: string, 
   if (n.length < 10) throw new UserError('Explain in a sentence (stays internal).');
   return tx(async () => {
     if (on) {
-      const rs = await db.all<{ id: string; status: string }>(`SELECT id, status::text FROM receipts WHERE warehouse_id=$1 AND commodity_code=$2 AND status IN ('issued','partially_released') FOR UPDATE`, whId, commodity);
+      const rs = await db.all<{ id: string; status: string }>(`SELECT id, status::text FROM receipts WHERE warehouse_id=$1 AND commodity_code=$2 AND status IN ('issued','partially_released','pledged','financed') FOR UPDATE`, whId, commodity);
       for (const r of rs) {
         await db.run(`UPDATE receipts SET status='under_exception', distribution_enabled=false WHERE id=$1`, r.id);
         await db.run(`INSERT INTO receipt_events (receipt_id, event_type, occurred_at, actor, data) VALUES ($1,'review_started',now(),$2,$3)`, r.id, `user:${a.user.id}`, JSON.stringify({ previous_status: r.status, note: n }));
@@ -324,7 +324,9 @@ export async function setUnderReview(a: Actor, whId: string, commodity: string, 
       `SELECT r.id, (SELECT e.data->>'previous_status' FROM receipt_events e WHERE e.receipt_id=r.id AND e.event_type='review_started' ORDER BY e.seq DESC LIMIT 1) AS prev
        FROM receipts r WHERE r.warehouse_id=$1 AND r.commodity_code=$2 AND r.status='under_exception' FOR UPDATE`, whId, commodity);
     for (const r of rs) {
-      const back = ['issued', 'partially_released'].includes(r.prev) ? r.prev : 'issued';
+      const pledgedNow = !!(await db.val('SELECT 1 FROM liens WHERE receipt_id=$1 AND released_at IS NULL', r.id));
+      let back = ['issued', 'partially_released', 'pledged', 'financed'].includes(r.prev) ? r.prev : 'issued';
+      if (['pledged', 'financed'].includes(back) && !pledgedNow) back = 'issued';   // the loan closed during the review
       await db.run(`UPDATE receipts SET status=$2 WHERE id=$1`, r.id, back);
       await db.run(`INSERT INTO receipt_events (receipt_id, event_type, occurred_at, actor, data) VALUES ($1,'review_ended',now(),$2,$3)`, r.id, `user:${a.user.id}`, JSON.stringify({ status: back, note: n }));
     }

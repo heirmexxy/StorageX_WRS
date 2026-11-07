@@ -2,6 +2,24 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-07 (Build 7)
+
+1. **Any lender, Kitovu included.** Lenders (and Kitovu, lending from its own balance sheet) define products: interest per month (simple, daily), one-off fee, tenor, amount range, crops, the identity level needed before disbursement (default level 2: account opened with the lender), and warning and liquidation levels for loan ÷ stock value.
+2. **Kitovu prepares batches of requests** (farmer, receipts, amount) for one lender's product. Amounts are capped by what the receipts support under that lender's valuation policy today, rechecked at submission and again at approval. A receipt can sit in only one pending request. External lenders need the farmer's consent on record.
+3. **Four different hands:** Kitovu prepares; a lender credit officer (never the preparer) approves or rejects each line, approving the amount asked or less; approval pledges the receipts; a different lender person records the disbursement (the database refuses the approver), with the transfer reference only. Approved-but-unpaid loans can be cancelled, releasing the receipts.
+4. **One active lien per receipt**, enforced by a unique index. Pledged and financed receipts cannot be released, cancelled or put in another request; their public page says "pledged to a lender".
+5. **Money on a loan is an append-only list** (disbursement, fee, repayment, waiver). Interest is calculated from it, never stored. Payments go to fees, then interest, then principal. Kitovu finance can record a repayment it collected; only the lender can waive. When nothing is owed the loan closes and the receipts return to their earlier status.
+6. **Margin watch**: loans past the warning level, the liquidation level, overdue, or without a usable price are listed for the lender and Kitovu. (Enforcement and sale come in Build 8.)
+7. **National Collateral Registry file**: the lender downloads a CSV of its active liens with debtor, collateral and amounts. StorageX holds no BVN/NIN, so the lender adds the identity number from its own records; its customer reference is included.
+8. **Batch reviewer agent** (first agent of the Build 11 set, brought forward): fixed checks in code for every line (identity, consent, loan-to-value, price evidence, warehouse status and insurance, stock reconciliation, loan history, concentration), plus an optional AI note for the credit officer written only from those checks. It never decides or changes an amount.
+
+## Where AI agents sit
+
+Agents read, check and draft; people decide. No agent moves money, issues or releases a receipt, changes a lien or approves anything. Each is switchable in Settings, logs what it saw, and its advice is compared with the human decision so its accuracy is measured.
+
+- In place now: ID pre-check (Build 2.1), scale and moisture display reader (Build 3), batch reviewer (Build 7).
+- Next: intake inspector (patterns across deliveries: same clerk, odd weights, duplicates), data steward (cleans and merges farmer records), margin agent (drafts margin-call messages), farmer assistant on SMS/USSD/WhatsApp (answers "what is my receipt worth, what do I owe"), lender assistant (portfolio questions in plain English), compliance agent (NCR filing and reports prepared for sign-off).
+
 ## 2026-11-07 (Build 6)
 
 1. **Prices come from named sources and need a second person.** Kitovu finance or operations enter a price (crop, state, market, source, price as quoted, date, optional evidence); someone in Kitovu finance other than the enterer approves it. A price more than 25% (Settings) away from the current reference needs a written explanation.

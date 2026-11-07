@@ -40,7 +40,7 @@ function scope(a: Actor) {
   const m = a.membership!;
   if (m.org_kind === 'kitovu') return { where: '$1::uuid IS NULL', arg: null };
   if (m.org_kind === 'warehouse_operator') return { where: 'w.operator_org_id = $1', arg: m.org_id };
-  if (m.org_kind === 'lender') return { where: `EXISTS (SELECT 1 FROM farmer_consents fc WHERE fc.farmer_id=r.owner_farmer_id AND fc.org_id=$1 AND fc.withdrawn_at IS NULL)`, arg: m.org_id };
+  if (m.org_kind === 'lender') return { where: `(EXISTS (SELECT 1 FROM farmer_consents fc WHERE fc.farmer_id=r.owner_farmer_id AND fc.org_id=$1 AND fc.withdrawn_at IS NULL) OR EXISTS (SELECT 1 FROM liens li WHERE li.receipt_id=r.id AND li.lender_org_id=$1))`, arg: m.org_id };
   if (m.org_kind === 'field_partner_network' || m.org_kind === 'cooperative')
     return { where: `(EXISTS (SELECT 1 FROM memberships mm WHERE mm.user_id=f.registered_by_user AND mm.org_id=$1) OR EXISTS (SELECT 1 FROM field_partners fp WHERE fp.id=f.registered_by_partner AND fp.org_id=$1))`, arg: m.org_id };
   return { where: 'false AND $1::uuid IS NULL', arg: null };
@@ -186,7 +186,7 @@ const PUBLIC_STATUS: Record<string, { label: string; tone: 'ok' | 'warn' | 'bad'
   cancelled: { label: 'Cancelled', tone: 'bad', note: 'This receipt was cancelled and is not valid.' },
   expired: { label: 'Expired', tone: 'bad', note: 'This receipt has expired.' },
 };
-export const EVENT_LABEL: Record<string, string> = { issued: 'Issued', cancelled: 'Cancelled', released: 'Part withdrawn', review_started: 'Put under review', review_ended: 'Review ended', legacy_issued: 'Issued (old system)', legacy_closed: 'Closed (old system)', liquidated: 'Liquidated', closed: 'Closed' };
+export const EVENT_LABEL: Record<string, string> = { issued: 'Issued', cancelled: 'Cancelled', released: 'Part withdrawn', pledged: 'Pledged to a lender', financed: 'Loan paid out', lien_released: 'Pledge released', review_started: 'Put under review', review_ended: 'Review ended', legacy_issued: 'Issued (old system)', legacy_closed: 'Closed (old system)', liquidated: 'Liquidated', closed: 'Closed' };
 
 export async function passport(token: string, sig: string | undefined, ip: string) {
   if (!(await rateLimit(`passport:${ip}`, 120, 600))) throw new UserError('Too many checks from this network. Wait a few minutes.');
