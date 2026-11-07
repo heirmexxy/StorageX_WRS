@@ -7,12 +7,18 @@ import type { Session, Actor } from './auth';
 export class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
 
 const MAX_BODY = 1_000_000;
+const MAX_MULTIPART = 12_000_000;   // two 5 MB photos plus fields
+
+export interface Upload { filename: string; type: string; data: Buffer }
 
 export class Ctx {
   url: URL;
   method: string;
   params: Record<string, string> = {};
   body: Record<string, string> = {};
+  files: Record<string, Upload> = {};
+  /** Every value of a repeated field (checkbox groups). */
+  multi: Record<string, string[]> = {};
   cookies: Record<string, string>;
   session: Session | null = null;
   sessionToken = '';
@@ -45,15 +51,34 @@ export class Ctx {
   get query() { return Object.fromEntries(this.url.searchParams); }
   get user() { return this.session?.user ?? null; }
   get membership() { return this.session?.active ?? null; }
+  /** Raw file bytes for a binary response (decrypted uploads). Never cached; never sniffed. */
+  bytes(data: Buffer, mime: string, filename: string) {
+    if (this.head(200, { 'Content-Type': mime, 'Content-Length': String(data.length), 'Cache-Control': 'no-store, private', 'Content-Disposition': `inline; filename="${filename.replace(/[^\w.-]/g, '_')}"` })) this.res.end(data);
+  }
   get actor(): Actor { if (!this.session) throw new HttpError(401, 'Sign in first.'); return { user: this.session.user, membership: this.session.active, ip: this.ip }; }
 
   async readBody() {
     if (this.method !== 'POST') return;
     const type = String(this.req.headers['content-type'] || '');
+    const multipart = type.startsWith('multipart/form-data');
+    // Large uploads only from fully signed-in people; anonymous posts stay small.
+    const limit = multipart && this.session?.twofaOk ? MAX_MULTIPART : MAX_BODY;
     const chunks: Buffer[] = []; let size = 0;
-    for await (const c of this.req) { size += (c as Buffer).length; if (size > MAX_BODY) throw new HttpError(413, 'Request too large.'); chunks.push(c as Buffer); }
-    const raw = Buffer.concat(chunks).toString('utf8');
-    if (type.startsWith('application/x-www-form-urlencoded')) this.body = Object.fromEntries(new URLSearchParams(raw));
+    for await (const c of this.req) { size += (c as Buffer).length; if (size > limit) throw new HttpError(413, multipart ? 'Files too large: each photo must be under 5 MB.' : 'Request too large.'); chunks.push(c as Buffer); }
+    const buf = Buffer.concat(chunks);
+    if (multipart) {
+      const b = type.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+      if (!b) throw new HttpError(400, 'Malformed upload.');
+      const r = parseMultipart(buf, b[1] || b[2]);
+      this.body = r.fields; this.files = r.files; this.multi = r.multi;
+      return;
+    }
+    const raw = buf.toString('utf8');
+    if (type.startsWith('application/x-www-form-urlencoded')) {
+      const p = new URLSearchParams(raw);
+      this.body = Object.fromEntries(p);
+      for (const k of new Set(p.keys())) this.multi[k] = p.getAll(k);
+    }
     else if (type.startsWith('application/json') && raw) { try { this.body = JSON.parse(raw); } catch { throw new HttpError(400, 'Invalid JSON.'); } }
   }
 
@@ -96,6 +121,31 @@ export class Ctx {
     const ref = String(this.req.headers.referer || '');
     this.redirect(ref.startsWith(config.baseUrl) ? ref.slice(config.baseUrl.length) || fallback : fallback);
   }
+}
+
+function parseMultipart(buf: Buffer, boundary: string) {
+  const fields: Record<string, string> = {}, files: Record<string, Upload> = {}, multi: Record<string, string[]> = {};
+  const delim = Buffer.from(`--${boundary}`);
+  let pos = buf.indexOf(delim);
+  while (pos !== -1) {
+    const start = pos + delim.length;
+    if (buf.subarray(start, start + 2).toString() === '--') break;
+    const headEnd = buf.indexOf('\r\n\r\n', start);
+    if (headEnd === -1) break;
+    const head = buf.subarray(start + 2, headEnd).toString();
+    const next = buf.indexOf(delim, headEnd);
+    if (next === -1) break;
+    const data = buf.subarray(headEnd + 4, next - 2);
+    const name = head.match(/name="([^"]*)"/)?.[1];
+    const filename = head.match(/filename="([^"]*)"/)?.[1];
+    const ctype = head.match(/Content-Type:\s*([^\r\n]+)/i)?.[1] || 'application/octet-stream';
+    if (name) {
+      if (filename !== undefined) { if (filename && data.length) files[name] = { filename, type: ctype, data: Buffer.from(data) }; }
+      else { fields[name] = data.toString(); (multi[name] ||= []).push(fields[name]); }
+    }
+    pos = next;
+  }
+  return { fields, files, multi };
 }
 
 function parseCookies(s: string) {

@@ -26,6 +26,22 @@ export function decrypt(box: string) {
   return Buffer.concat([d.update(Buffer.from(data, 'base64url')), d.final()]).toString('utf8');
 }
 
+export function encryptBuffer(plain: Buffer) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', encKey(), iv);
+  const data = Buffer.concat([c.update(plain), c.final()]);
+  return Buffer.concat([Buffer.from('SXE1'), iv, c.getAuthTag(), data]);
+}
+export function decryptBuffer(box: Buffer) {
+  if (box.subarray(0, 4).toString() !== 'SXE1') throw new Error('unknown file cipher');
+  const d = crypto.createDecipheriv('aes-256-gcm', encKey(), box.subarray(4, 16));
+  d.setAuthTag(box.subarray(16, 32));
+  return Buffer.concat([d.update(box.subarray(32)), d.final()]);
+}
+
+/** Keyed hash of an identity number: equal numbers give equal hashes (duplicate checks), but it cannot be reversed. */
+export const hashIdNumber = (type: string, normalised: string) => crypto.createHmac('sha256', 'storagex:id:' + config.secret).update(`${type}:${normalised}`).digest('hex');
+
 /** scrypt password hashing: scrypt$N$r$p$salt$hash (same format as ComboTrader). */
 export function hashPassword(pw: string) {
   const salt = crypto.randomBytes(16);
@@ -50,3 +66,16 @@ export function passwordProblem(pw: string, email = '') {
 
 export const minutesFromNow = (m: number) => new Date(Date.now() + m * 60_000);
 export const hoursFromNow = (h: number) => minutesFromNow(h * 60);
+
+/** Nigerian-first phone normalisation to E.164: 0803..., 803..., 234803..., +234803... and other +country numbers. */
+export function normPhone(raw: unknown): string | null {
+  let p = String(raw ?? '').replace(/[\s\-().]/g, '');
+  if (!p) return null;
+  if (p.startsWith('+')) return /^\+[1-9]\d{7,14}$/.test(p) ? p : null;
+  if (p.startsWith('00')) return normPhone('+' + p.slice(2));
+  if (/^234\d{10}$/.test(p)) return '+' + p;
+  if (/^0[789]\d{9}$/.test(p)) return '+234' + p.slice(1);
+  if (/^[789]\d{9}$/.test(p)) return '+234' + p;
+  return null;
+}
+export const clean = (v: unknown, max = 200) => String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, max);

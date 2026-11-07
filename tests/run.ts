@@ -11,6 +11,13 @@ import { can, canGrant, validRole, type Membership } from '../src/lib/rbac';
 import * as A from '../src/lib/auth';
 import { verifyAuditChain } from '../src/lib/audit';
 import { handle } from '../src/server';
+import { normPhone, encryptBuffer, decryptBuffer } from '../src/lib/util';
+import { smsAllowed } from '../src/lib/rbac';
+import { sniff, fileRow, readFile } from '../src/lib/files';
+import { sentForTests } from '../src/lib/sms';
+import * as R from '../src/lib/registry';
+import * as K from '../src/lib/kyc';
+import * as P from '../src/lib/applications';
 
 let pass = 0, fail = 0;
 async function t(name: string, fn: () => unknown | Promise<unknown>) {
@@ -24,6 +31,8 @@ async function rejects(p: Promise<unknown>, code?: string) {
   throw new Error(`expected an error${code ? ' ' + code : ''}`);
 }
 const sys = { label: 'test' };
+const lastCode = () => (sentForTests.at(-1)?.text.match(/\b(\d{6})\b/) || [])[1];
+const jpeg = (n = 1) => ({ filename: 'x.jpg', type: 'image/jpeg', data: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, n)]) });
 const totpNow = async (userId: string) => totpCode((await A.pendingTotpSecret(userId))!);
 
 async function freshDb() {
@@ -73,11 +82,26 @@ async function main() {
     const k: Membership = { org_id: 'K', org_kind: 'kitovu', org_name: 'Kitovu', role: 'ops_manager' };
     const l: Membership = { org_id: 'L1', org_kind: 'lender', org_name: 'Lender 1', role: 'lender_admin' };
     ok(can(k, 'farmers.edit', 'L1'), 'kitovu reaches every org'); ok(!can(l, 'finance.view', 'L2'), 'lender limited to own org'); ok(can(l, 'finance.view', 'L1'));
-    ok(!can(l, 'farmers.view'), 'lender has no farmer access in Build 1');
+    ok(can(l, 'farmers.view') && !can(l, 'farmers.edit'), 'lenders read farmers (consent-scoped), never edit');
     ok(!canGrant(k, 'kitovu', 'K', 'super_admin'), 'only super admin makes super admin');
     ok(!canGrant(k, 'kitovu', 'K', 'finance'), 'ops cannot grant finance.approve it lacks');
     ok(canGrant(k, 'warehouse_operator', 'W1', 'warehouse_clerk'));
     ok(canGrant(l, 'lender', 'L1', 'credit_officer')); ok(!canGrant(l, 'lender', 'L2', 'credit_officer')); ok(!canGrant(l, 'kitovu', 'K', 'viewer'));
+  });
+
+  await t('phones: Nigerian forms normalise to E.164', () => {
+    eq(normPhone('0803 123 4567'), '+2348031234567'); eq(normPhone('2348031234567'), '+2348031234567'); eq(normPhone('+2348031234567'), '+2348031234567');
+    eq(normPhone('8031234567'), '+2348031234567'); eq(normPhone('12345'), null); eq(normPhone(''), null); eq(normPhone('+44 7700 900123'), '+447700900123');
+  });
+  await t('files: type by first bytes, encrypted round-trip', () => {
+    eq(sniff(jpeg().data), 'image/jpeg'); eq(sniff(Buffer.from('%PDF-1.7 hello world')), 'application/pdf'); eq(sniff(Buffer.from('<html><script>alert(1)</script>')), null);
+    const b = Buffer.from('a photo'); ok(decryptBuffer(encryptBuffer(b)).equals(b)); ok(!encryptBuffer(b).includes(b));
+  });
+  await t('SMS second step only for low-risk roles', () => {
+    const m = (org_kind: any, role: string): Membership => ({ org_id: 'x', org_kind, org_name: 'x', role });
+    ok(smsAllowed([m('lender', 'lender_viewer')])); ok(smsAllowed([m('warehouse_operator', 'warehouse_clerk')]));
+    ok(!smsAllowed([m('lender', 'credit_officer')]), 'approves money'); ok(!smsAllowed([m('kitovu', 'viewer')]), 'Kitovu staff');
+    ok(!smsAllowed([m('warehouse_operator', 'warehouse_clerk'), m('lender', 'lender_admin')]), 'every membership must qualify'); ok(!smsAllowed([]));
   });
 
   console.log('\nDatabase');
@@ -182,6 +206,166 @@ async function main() {
     eq(await verifyAuditChain(), '2');
   });
 
+  console.log('\nRegistry and identity checks');
+  const kitovuId = admin.membership!.org_id;
+  const ops = await makeUser(admin, 'field@kitovu.com.ng', kitovuId, 'ops_manager');
+  const compliance = await makeUser(admin, 'compliance@kitovu.com.ng', kitovuId, 'compliance');
+  const officer = await makeUser(admin, 'credit@accion.test', accionId, 'credit_officer');
+  const other = await makeUser(admin, 'credit@lenderb.test', otherId, 'credit_officer');
+  let ada = '';
+  await t('register a farmer; codes start after legacy; same phone + similar name warns', async () => {
+    ada = await R.createFarmer(ops, { full_name: 'Ada  Okafor', phone: '0803 123 4567', state_code: 'NI', community: 'Gidan Kwano', commodities: ['MAZ', 'SBN'], sex: 'female', year_of_birth: '1985' });
+    eq(ada, 'SXF-200000');
+    const e = await rejects(R.createFarmer(ops, { full_name: 'Okafor Ada', phone: '+2348031234567' }));
+    ok(e instanceof R.DuplicateWarning, 'duplicate warned');
+    ok(await R.createFarmer(ops, { full_name: 'Chidi Okafor', phone: '08031234567' }), 'a relative sharing the phone is fine');
+    await rejects(R.createFarmer(ops, { full_name: 'Bad Crop', commodities: ['XYZ'] }));
+    await rejects(R.createFarmer(officer, { full_name: 'Lender Made' }));
+    eq((await R.searchFarmers(ops, { text: '08031234567' })).length, 2);
+  });
+  await t('lenders see no farmer until the farmer consents', async () => {
+    eq((await R.searchFarmers(officer)).length, 0);
+    eq(await R.farmerByCode(officer, ada), undefined);
+  });
+  let subId = '';
+  await t('level 1: phone code, ID + selfie, duplicate ID refused, maker-checker review', async () => {
+    await rejects(K.submitLevel1(ops, ada, { id_type: 'nin', id_number: '12345678901' }, { id_doc: jpeg(), selfie: jpeg(2) }));   // phone first
+    await K.sendPhoneCode(ops, ada);
+    eq(sentForTests.at(-1)!.to, '+2348031234567');
+    await rejects(K.confirmPhone(ops, ada, '000000'));
+    await K.confirmPhone(ops, ada, lastCode()!);
+    await rejects(K.submitLevel1(ops, ada, { id_type: 'nin', id_number: '1234' }, { id_doc: jpeg(), selfie: jpeg(2) }));
+    await rejects(K.submitLevel1(ops, ada, { id_type: 'nin', id_number: '12345678901' }, { id_doc: { filename: 'x.jpg', type: 'image/jpeg', data: Buffer.from('<svg onload=alert(1)>xxxxxxxx') }, selfie: jpeg(2) }));
+    subId = await K.submitLevel1(ops, ada, { id_type: 'nin', id_number: '123 4567 8901' }, { id_doc: jpeg(), selfie: jpeg(2) });
+    const raw = await db.get<any>('SELECT * FROM kyc_submissions WHERE id=$1', subId);
+    eq(raw.id_last4, '8901'); ok(!JSON.stringify(raw).includes('12345678901'), 'full number never stored');
+    await rejects(K.review(ops, subId, 'approve', { checks: ['name_matches', 'face_matches', 'id_original'] }));   // ops lacks kyc.review
+    await rejects(K.review(compliance, subId, 'approve', { checks: ['name_matches'] }));
+    await K.review(compliance, subId, 'approve', { checks: ['name_matches', 'face_matches', 'id_original'] });
+    const f = (await R.farmerByCode(ops, ada))!;
+    eq(f.kyc_level, 1); eq(f.id_last4, '8901');
+    ok(await db.val(`SELECT delete_after FROM files WHERE id=$1`, raw.id_doc_file_id), 'ID photo scheduled for deletion');
+  });
+  await t('the same ID number cannot back a second farmer', async () => {
+    const twin = await R.createFarmer(ops, { full_name: 'Ada Twin', phone: '08099990000' });
+    await K.sendPhoneCode(ops, twin); await K.confirmPhone(ops, twin, lastCode()!);
+    const e = await rejects(K.submitLevel1(ops, twin, { id_type: 'nin', id_number: '12345678901' }, { id_doc: jpeg(), selfie: jpeg(2) }));
+    ok(String(e.message).includes(ada));
+  });
+  await t('a reviewer cannot approve their own submission', async () => {
+    const own = await R.createFarmer(admin, { full_name: 'Self Check', phone: '08055550000' });
+    await K.sendPhoneCode(admin, own); await K.confirmPhone(admin, own, lastCode()!);
+    const id = await K.submitLevel1(admin, own, { id_type: 'voters_card', id_number: '90F5B1E0A1234567890' }, { id_doc: jpeg(), selfie: jpeg(2) });
+    await rejects(K.review(admin, id, 'approve', { checks: ['name_matches', 'face_matches', 'id_original'] }));
+    await rejects(db.run(`UPDATE kyc_submissions SET reviewed_by=submitted_by WHERE id=$1`, id));   // the database refuses it too
+    await K.review(compliance, id, 'reject', { reason: 'unreadable' });
+    eq((await R.farmerByCode(admin, own))!.kyc_level, 0);
+  });
+  await t('consent by SMS code opens the record to that lender only', async () => {
+    await rejects(K.recordConsent(ops, ada, { org_id: accionId, method: 'sms_code', otp: '123456', read_aloud: '1' }));
+    await K.sendConsentCode(ops, ada, accionId);
+    ok(sentForTests.at(-1)!.text.includes('Accion'));
+    await rejects(K.recordConsent(ops, ada, { org_id: accionId, method: 'sms_code', otp: lastCode() }), );   // not read aloud
+    await K.sendConsentCode(ops, ada, accionId);
+    await K.recordConsent(ops, ada, { org_id: accionId, method: 'sms_code', otp: lastCode(), read_aloud: '1' });
+    eq((await R.searchFarmers(officer)).map((f) => f.code), [ada]);
+    eq((await R.searchFarmers(other)).length, 0);
+  });
+  await t('level 2: lender confirms its account; account numbers refused', async () => {
+    await rejects(K.lenderVerify(officer, ada, '0123456789'));
+    await rejects(K.lenderVerify(other, ada, 'CUST-1'));
+    await K.lenderVerify(officer, ada, 'ACC-CIF-88812');
+    eq((await R.farmerByCode(officer, ada))!.kyc_level, 2);
+    const seen = await K.verificationsFor(officer, (await R.farmerByCode(officer, ada))!.id);
+    eq(seen[0].customer_ref, 'ACC-CIF-88812');
+    await K.lenderRevoke(officer, ada);
+    eq((await R.farmerByCode(officer, ada))!.kyc_level, 1);
+  });
+  await t('withdrawn consent hides the farmer again', async () => {
+    const c = (await K.consentsFor((await R.farmerByCode(ops, ada))!.id))[0];
+    await rejects(K.withdrawConsent(officer, c.id, 'x'));
+    await K.withdrawConsent(ops, c.id, 'Farmer called to withdraw');
+    eq(await R.farmerByCode(officer, ada), undefined);
+  });
+  await t('identity files open only for Kitovu roles that need them, and decrypt intact', async () => {
+    const k = await db.get<any>('SELECT * FROM kyc_submissions WHERE id=$1', subId);
+    const idDoc = (await fileRow(k.id_doc_file_id))!;
+    ok(await K.canOpenFile(compliance, idDoc)); ok(!(await K.canOpenFile(ops, idDoc)), 'ops sees selfies, not IDs'); ok(!(await K.canOpenFile(officer, idDoc)));
+    ok(readFile(idDoc).equals(jpeg().data));
+  });
+  await t('field partners: networks add, Kitovu verifies; networks see their own farmers', async () => {
+    const netId = await A.createOrg(admin, { code: 'AGENTS', name: 'Agent Network', kind: 'field_partner_network' });
+    const net = await makeUser(admin, 'lead@agents.test', netId, 'network_admin');
+    const code = await R.createFieldPartner(net, { full_name: 'Musa Bello', phone: '08061112222', state_code: 'KD' });
+    ok(/^SXA-5\d{4}$/.test(code));
+    await rejects(R.createFarmer(net, { full_name: 'Too Early', field_partner_code: code }));   // not verified yet
+    const fp = (await R.listFieldPartners(net))[0];
+    await rejects(R.setFieldPartnerStatus(net, fp.id, 'active'));
+    await R.setFieldPartnerStatus(admin, fp.id, 'active');
+    const mine = await R.createFarmer(net, { full_name: 'Halima Musa', field_partner_code: code });
+    eq((await R.searchFarmers(net)).map((f) => f.code), [mine]);
+  });
+  await t('review queue: resolving the last item clears the review flag', async () => {
+    const f = (await R.farmerByCode(ops, ada))!;
+    await db.run('UPDATE farmers SET needs_review=true WHERE id=$1', f.id);
+    await db.run(`INSERT INTO data_issues (entity, entity_id, severity, code, detail) VALUES ('farmer',$1,'review','phone_invalid','test')`, f.id);
+    const [i] = await R.openIssues(ops, { entity: 'farmer', entityId: f.id });
+    await rejects(R.openIssues(officer));
+    await rejects(R.resolveIssue(ops, i.id, ''));
+    await R.resolveIssue(ops, i.id, 'Called the farmer, number confirmed');
+    eq((await R.farmerByCode(ops, ada))!.needs_review, false);
+  });
+  await t('warehouses: certification needs GPS and capacity; insurance needs a second person', async () => {
+    const opId = await A.createOrg(admin, { code: 'KITWH', name: 'Kitovu Stores', kind: 'warehouse_operator' });
+    const whid = await db.val<string>(`INSERT INTO warehouses (code, name, operator_org_id, tier, state_code) VALUES ('WH-NI-MNA-02','Minna 2',$1,'A','NI') RETURNING id`, opId);
+    await rejects(R.updateWarehouse(ops, 'WH-NI-MNA-02', { status: 'certified' }));
+    await R.updateWarehouse(ops, 'WH-NI-MNA-02', { status: 'certified', lat: '9.61', lng: '6.55', capacity_tonnes: '500', commodities: 'MAZ, SBN' });
+    ok((await R.warehouseByCode(ops, 'WH-NI-MNA-02'))!.can_back_loans);
+    await R.addPolicy(ops, 'WH-NI-MNA-02', { insurer_name: 'Leadway', cover_from: '2026-01-01', cover_to: '2027-12-31', sum_insured_naira: '50,000,000' });
+    const [p] = await R.policiesFor(whid!);
+    await rejects(R.verifyPolicy(ops, p.id));
+    await R.verifyPolicy(admin, p.id);
+    eq((await R.policiesFor(whid!))[0].status, 'active');
+  });
+
+  console.log('\nPartner applications');
+  await t('public application → approve creates the org and an admin invitation', async () => {
+    eq(await P.submitApplication({ kind: 'lender', org_name: 'Bot Bank', contact_name: 'Bot', email: 'b@b.co', phone: '08011112222', agree: '1', website: 'http://spam' }, '9.9.9.9'), 'spam');
+    await rejects(P.submitApplication({ kind: 'kitovu', org_name: 'X Org', contact_name: 'X Y', email: 'x@y.co', phone: '08011112222', agree: '1' }, '9.9.9.9'));
+    eq(await P.submitApplication({ kind: 'lender', org_name: 'LAPO Microfinance Bank', contact_name: 'Grace Obi', email: 'grace@lapo.test', phone: '08011112222', state_code: 'ED', agree: '1', about: 'National MFB' }, '9.9.9.9'), 'ok');
+    const [app] = await P.listApplications(admin);
+    await rejects(P.approveApplication(ops, app.id, {}));
+    const r = await P.approveApplication(admin, app.id, {});
+    eq(r.code, 'LMB');
+    const inv = await A.findInvite(r.link.split('/invite/')[1]);
+    eq(inv?.role, 'lender_admin'); eq(inv?.email, 'grace@lapo.test');
+    eq(await db.val(`SELECT status FROM organisations WHERE code='LMB'`), 'onboarding');
+    await rejects(P.approveApplication(admin, app.id, {}));
+  });
+
+  console.log('\nSMS second step');
+  await t('a low-risk role can use SMS codes; gaining a sensitive role turns them off', async () => {
+    const { link } = await A.invite(admin, { email: 'grace.v@accion.test', fullName: 'Viewer', orgId: accionId, role: 'lender_viewer' });
+    await A.acceptInvite(link.split('/invite/')[1], 'harmattan mornings in jos', '1.1.1.1');
+    let u = await A.login('grace.v@accion.test', 'harmattan mornings in jos', '1.1.1.1');
+    eq(u.factor, null);
+    await A.sendLoginSms(u.id, '0807 000 1111');
+    await rejects(A.confirmSmsEnrolment(u.id, '000000', sys), 'code');
+    const codes = await A.confirmSmsEnrolment(u.id, lastCode()!, sys);
+    eq(codes.length, 10);
+    u = await A.login('grace.v@accion.test', 'harmattan mornings in jos', '1.1.1.1');
+    eq(u.factor, 'sms'); eq(u.phone_e164, '+2348070001111');
+    await A.sendLoginSms(u.id, '08099999999');   // codes go only to the enrolled number
+    eq(sentForTests.at(-1)!.to, '+2348070001111');
+    ok(!(await A.verifySecondFactor(u.id, '000000', sys)));
+    await A.sendLoginSms(u.id);
+    ok(await A.verifySecondFactor(u.id, lastCode()!, sys));
+    await db.run(`UPDATE memberships SET role='credit_officer' WHERE user_id=$1`, u.id);
+    eq((await A.login('grace.v@accion.test', 'harmattan mornings in jos', '1.1.1.1')).factor, null, 'must set up an authenticator now');
+    await A.sendLoginSms(u.id).then(() => { throw new Error('sent'); }, (e) => eq(e.code, 'forbidden'));
+    await rejects(A.sendLoginSms(ops.user.id, '08011110000'), 'forbidden');
+  });
+
   console.log('\nHTTP');
   await db.run('DELETE FROM rate_limits');
   const server = http.createServer((req, res) => { handle(req, res); });
@@ -228,6 +412,41 @@ async function main() {
     eq((await req('GET', '/app')).status, 200);
     eq((await req('GET', '/admin/orgs')).status, 403);
     eq((await req('GET', '/admin/people')).status, 403);
+  });
+
+  await t('public apply form works signed out; honeypot is silent', async () => {
+    await req('POST', '/logout', {});
+    const g = await req('GET', '/apply'); eq(g.status, 200); ok(g.text.includes('Partner with StorageX'));
+    const p = await req('POST', '/apply', { kind: 'warehouse_operator', org_name: 'Kebbi Stores Ltd', contact_name: 'Sani Bala', email: 'sani@kebbi.test', phone: '08033334444', agree: '1' });
+    eq(p.status, 303); eq(p.location, '/apply/thanks');
+    eq((await req('POST', '/apply', { kind: 'lender', org_name: '', contact_name: '', email: 'no', phone: '1', agree: '1' })).status, 400);
+  });
+  async function signInAs(u: A.Actor) {
+    const tok = await A.completeSecondFactor(await A.createSession(u.user.id, '127.0.0.1', 'test'), sys);
+    jar.sx_sid = tok;
+  }
+  await t('upload an ID check through the form; only compliance can open the photo', async () => {
+    await signInAs(ops);
+    const code = await R.createFarmer(ops, { full_name: 'Uche Form', phone: '08044445555', state_code: 'EN' });
+    await K.sendPhoneCode(ops, code); await K.confirmPhone(ops, code, lastCode()!);
+    const page = await req('GET', `/farmers/${code}`); eq(page.status, 200); ok(page.text.includes('Send for review'));
+    const fd = new FormData();
+    fd.set('_csrf', decodeURIComponent(jar.sx_csrf)); fd.set('id_type', 'drivers_licence'); fd.set('id_number', 'ABC12345XY');
+    fd.set('id_doc', new Blob([jpeg(5).data], { type: 'image/jpeg' }), 'id.jpg'); fd.set('selfie', new Blob([jpeg(6).data], { type: 'image/jpeg' }), 'me.jpg');
+    const up = await fetch(base + `/farmers/${code}/kyc`, { method: 'POST', redirect: 'manual', body: fd, headers: { cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') } });
+    eq(up.status, 303);
+    const k = await db.get<any>(`SELECT k.* FROM kyc_submissions k JOIN farmers f ON f.id=k.farmer_id WHERE f.code=$1`, code);
+    ok(k, 'submission stored'); eq(k.id_last4, '45XY');
+    eq((await req('GET', `/files/${k.id_doc_file_id}`)).status, 404, 'ops cannot open ID photos');
+    await signInAs(compliance);
+    const q = await req('GET', '/kyc/review'); ok(q.text.includes('Uche Form'));
+    const img = await req('GET', `/files/${k.id_doc_file_id}`); eq(img.status, 200); eq(img.headers.get('content-type'), 'image/jpeg');
+    ok(await db.val(`SELECT 1 FROM audit_log WHERE action='file.viewed'`), 'opening is logged');
+    await signInAs(officer);
+    eq((await req('GET', `/files/${k.id_doc_file_id}`)).status, 404);
+    eq((await req('GET', `/farmers/${code}`)).status, 404, 'no consent, no record');
+    eq((await req('GET', '/kyc/review')).status, 403);
+    delete jar.sx_sid;
   });
   server.close();
 

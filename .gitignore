@@ -4,6 +4,8 @@ legacy/
 *.sql.gz
 *.dump
 data_issues*.csv
+data/            # local uploads (ID photos) and backups
+*.uploads.tar
 
 # Local env and secrets
 .env

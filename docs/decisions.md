@@ -2,6 +2,18 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-07 (Build 2)
+
+1. **Identity checks are tiered and work without a paid provider.** Level 0 is registered. Level 1 needs the farmer's phone confirmed by SMS code, a photo of an ID and a face photo, approved by a second Kitovu person (the database refuses a reviewer who is the submitter). Level 2 is a lender confirming it opened an account, which means its own BVN/NIN checks are done. A paid NIN lookup (Smile ID, Dojah or Youverify) plugs into `src/lib/kyc.ts` later and only adds a result to the review.
+2. **Full ID numbers are never stored.** StorageX keeps a keyed hash (to catch one ID on two records) and the last 4 characters. Lenders give their own customer reference; a 10-digit number is refused as a likely account number.
+3. **ID photos are encrypted on disk and seen only by Kitovu compliance.** Face photos also by Kitovu operations. Every opening is logged. ID photos are deleted after `ID_DOC_RETENTION_DAYS` (default 365) once approved, and both photos 30 days after a rejection; the decision stays. Backups archive the encrypted files with the database dump.
+4. **Lenders see a farmer only after that farmer consents to that lender**, by an SMS code or a signed paper form (photo kept), read aloud first. Withdrawing consent hides the farmer from the lender at once. Lender views of a farmer are logged.
+5. **Organisations can apply publicly; people still join only by invitation.** `/apply` collects applications; approving one creates the organisation (onboarding) and an invitation for its contact. Farmers do not apply online: they register through field partners.
+6. **SMS codes are allowed as the second sign-in step only for low-risk roles** (no Kitovu staff, nothing that manages people, approves money, issues receipts or reviews identity). Gaining such a role switches SMS off and sends the person to set up an authenticator app.
+7. **Phones are not unique.** A new farmer with the same phone and a similar name triggers a warning, not a block, because families share phones.
+8. **Field partners added by a network wait for Kitovu verification** before farmers can be registered against them; legacy agents stay `legacy_unverified` until verified.
+9. **Insurance counts only when a second Kitovu person verifies the policy**, and a warehouse cannot be certified or active without GPS coordinates and capacity.
+
 ## 2026-11-07 (Build 1)
 
 1. **Two-step sign-in is mandatory for every account**, Kitovu staff and partners alike. Recovery codes are issued once; administrators can reset the second step, which signs the person out everywhere.

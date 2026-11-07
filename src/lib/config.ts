@@ -18,6 +18,14 @@ export const config = {
   sessionIdleMinutes: Number(env('SESSION_IDLE_MINUTES', '60')),
   sessionMaxHours: Number(env('SESSION_MAX_HOURS', '12')),
   backupDir: env('BACKUP_DIR', 'data/backups'),
+  uploadsDir: env('UPLOADS_DIR', 'data/uploads'),
+  // SMS through Termii (the same account ComboTrader uses). Without a key, codes are only logged (never in production).
+  termiiKey: env('TERMII_API_KEY'),
+  termiiSender: env('TERMII_SENDER_ID', 'Kitovu'),
+  // Optional paid identity lookup. 'none' = Kitovu's own maker-checker review only.
+  kycProvider: env('KYC_PROVIDER', 'none'),
+  // ID photos and selfies are deleted this many days after a review decision (the decision and hashes remain).
+  idDocRetentionDays: Number(env('ID_DOC_RETENTION_DAYS', '365')),
 };
 
 if (production && !/^[0-9a-f]{64}$/i.test(config.secret)) {

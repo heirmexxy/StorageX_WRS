@@ -16,7 +16,10 @@ Every record in StorageX WRS follows these rules. The schema enforces most of th
 | Location | State by ISO code; LGA from the official list; community and address as given | `TA`, Karim Lamido |
 | Commodities | Three-letter codes from `commodities`; a farmer's crops are a list of codes | `{RCE,MAZ}` |
 | Time | `timestamptz`, stored in UTC; legacy local times are read as Africa/Lagos (+01:00) | — |
-| Identity numbers | BVN and NIN are verified through a KYC provider and never stored in StorageX; only the result is kept | `kyc = verified` |
+| Identity numbers | Never stored in full. Keyed hash (duplicate check) plus last 4 characters; BVN is never collected | `id_type = nin`, `id_last4 = 8901` |
+| Identity level | 0 registered · 1 phone + ID + face checked by Kitovu (maker-checker) · 2 a lender confirmed an account | `kyc_level = 1` |
+| Lender reference | The lender's own customer reference, never an account number | `DMFB-CIF-20931` |
+| Codes | Farmers `SXF-` + 6 digits (new from 200000; legacy below); field partners `SXA-` + 5 digits (new from 50000) | `SXF-200417` |
 | Deletion | Never hard-delete. Use `status` with a reason; duplicates become `merged` and point to the kept record | — |
 | Receipt history | Every change is a row in `receipt_events`: append-only, numbered, hash-chained | — |
 | Provenance | Imported rows keep their origin in `legacy` (JSON) and any problems in `data_issues` | — |

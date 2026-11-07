@@ -14,19 +14,33 @@ export function LoginPage({ c, error, email }: { c: Ctx; error?: string; email?:
           <button className="primary">Continue</button>
         </form>
         <p className="muted">No account? Ask your administrator for an invitation. Forgotten password? Ask them for a reset link.</p>
+        <p className="muted">A lender, warehouse, co-operative or agent network? <a href="/apply">Apply to partner with StorageX</a>.</p>
       </section>
     </Page>
   );
 }
 
-export function TwoFactorPage({ c, error }: { c: Ctx; error?: string }) {
+const maskPhone = (p: string | null) => (p ? p.slice(0, 7) + '•••' + p.slice(-2) : 'your phone');
+
+export function TwoFactorPage({ c, error, sent }: { c: Ctx; error?: string; sent?: boolean }) {
+  const sms = c.user?.factor === 'sms';
+  const next = encodeURIComponent(String(c.query.next || '/app'));
   return (
     <Page c={c} title="Two-step sign-in" bare>
       <section className="card narrow">
         <h1>Enter your code</h1>
-        <p>Open your authenticator app and type the 6-digit code for StorageX. Lost your phone? Use one of your recovery codes.</p>
+        {sms
+          ? <p>We text a 6-digit code to <strong>{maskPhone(c.user!.phone_e164)}</strong>. Lost the phone? Use one of your recovery codes.</p>
+          : <p>Open your authenticator app and type the 6-digit code for StorageX. Lost your phone? Use one of your recovery codes.</p>}
         {error && <p className="flash error">{error}</p>}
-        <form method="post" action="/login/2fa">
+        {sms && (
+          <form method="post" action={`/login/2fa/sms?next=${next}`}>
+            <Csrf c={c} />
+            <button className={sent ? '' : 'primary'}>{sent ? 'Send another code' : 'Text me a code'}</button>
+          </form>
+        )}
+        {sent && <p className="flash ok">Code sent. It expires in 10 minutes.</p>}
+        <form method="post" action={`/login/2fa?next=${next}`}>
           <Csrf c={c} />
           <Field label="Code" name="code" required autoComplete="one-time-code" />
           <button className="primary">Sign in</button>
@@ -37,12 +51,13 @@ export function TwoFactorPage({ c, error }: { c: Ctx; error?: string }) {
   );
 }
 
-export function SetupTwoFactorPage({ c, secret, qr, error }: { c: Ctx; secret: string; qr: string; error?: string }) {
+export function SetupTwoFactorPage({ c, secret, qr, error, smsOption }: { c: Ctx; secret: string; qr: string; error?: string; smsOption?: boolean }) {
   return (
     <Page c={c} title="Set up two-step sign-in" bare>
       <section className="card narrow">
         <h1>Set up two-step sign-in</h1>
         <p>Every StorageX account uses a second step, because lenders and farmers rely on what is recorded here.</p>
+        {smsOption && <p className="flash info">No smartphone app? Your role may <a href="/setup-2fa/sms">use text-message codes instead</a>. The app is safer and works without signal.</p>}
         <ol>
           <li>Install an authenticator app (Google Authenticator, Microsoft Authenticator or Authy).</li>
           <li>Scan this code, or type the key below.</li>
@@ -56,6 +71,31 @@ export function SetupTwoFactorPage({ c, secret, qr, error }: { c: Ctx; secret: s
           <Field label="6-digit code" name="code" required inputMode="numeric" autoComplete="one-time-code" />
           <button className="primary">Turn on</button>
         </form>
+      </section>
+    </Page>
+  );
+}
+
+export function SetupSmsPage({ c, error, phone, sent }: { c: Ctx; error?: string; phone?: string; sent?: boolean }) {
+  return (
+    <Page c={c} title="Text-message codes" bare>
+      <section className="card narrow">
+        <h1>Use text-message codes</h1>
+        <p>Each time you sign in, StorageX will text a 6-digit code to this number. Kitovu will never ask you for a code.</p>
+        {error && <p className="flash error">{error}</p>}
+        <form method="post" action="/setup-2fa/sms/send">
+          <Csrf c={c} />
+          <Field label="Mobile number" name="phone" type="tel" value={phone} required autoComplete="tel" hint="e.g. 08031234567" />
+          <button className={sent ? '' : 'primary'}>{sent ? 'Send again' : 'Send code'}</button>
+        </form>
+        {sent && (
+          <form method="post" action="/setup-2fa/sms">
+            <Csrf c={c} />
+            <Field label="6-digit code" name="code" required inputMode="numeric" autoComplete="one-time-code" />
+            <button className="primary">Turn on</button>
+          </form>
+        )}
+        <p><a href="/setup-2fa">Use an authenticator app instead</a></p>
       </section>
     </Page>
   );

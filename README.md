@@ -16,9 +16,13 @@ Node 22 and TypeScript, server-rendered React, PostgreSQL 16, built with esbuild
 | `src/lib/auth.ts` | Sign-in, lockout, two-step codes, sessions, invitations, password resets, people administration |
 | `src/lib/rbac.ts` | Roles per organisation type and the permission checks |
 | `src/lib/audit.ts` | Append-only, hash-chained audit log |
+| `src/lib/registry.ts` | Farmers, field partners, warehouses, insurance, the data review queue |
+| `src/lib/kyc.ts` | Tiered identity checks, consent to share with lenders, lender confirmation, provider slot |
+| `src/lib/applications.ts` | Public partner applications and their review |
+| `src/lib/files.ts`, `otp.ts`, `sms.ts` | Encrypted uploads, one-time SMS codes, Termii |
 | `src/lib/money.ts` | Kobo parsing and formatting |
 | `src/lib/migrate.ts` | Migration runner (checksummed) and seeds |
-| `src/cli.ts` | `migrate`, `seed`, `make-admin`, `backup`, `restore-check`, `verify-audit` |
+| `src/cli.ts` | `migrate`, `seed`, `make-admin`, `backup`, `restore-check`, `verify-audit`, `purge-files` |
 | `db/migrations/` | Schema, applied in order |
 | `tools/legacy-import/` | One-off importer from the 2021–22 StorageX dump |
 | `deploy/` | Hostinger VPS setup, update and the step-by-step guide |
@@ -34,7 +38,7 @@ cp .env.example .env                                    # set DATABASE_URL, NODE
 npm install
 npm run build && npm run migrate && npm run seed
 node dist/cli.mjs make-admin you@kitovu.com.ng "Your Name"   # prints an invitation link
-npm start                                               # http://localhost:3200
+npm start                                               # http://localhost:3200 (SMS codes print in the log until TERMII_API_KEY is set)
 npm test                                                # wipes and rebuilds TEST_DATABASE_URL (default storagex_test)
 ```
 
@@ -49,7 +53,8 @@ Deploying: [`deploy/HOSTINGER.md`](deploy/HOSTINGER.md).
 
 ## Rules for this codebase
 
-- No personal data in git: no dumps, exports or real seed data.
+- No personal data in git: no dumps, exports, uploads or real seed data.
+- Never store a full ID number, BVN or bank account number.
 - Money is integer kobo; weights are kilograms. See the data standard.
 - Every change to records goes through a function that writes the audit log in the same transaction.
 - Migrations only move forward and must keep working with the previous release.

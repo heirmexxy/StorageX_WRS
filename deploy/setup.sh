@@ -207,11 +207,11 @@ if [ ! -f "$APP_DIR/.env" ]; then
   sudo -u "$APP_USER" cp "$APP_DIR/.env.example" "$APP_DIR/.env"
   sed -i "s|^APP_SECRET=.*|APP_SECRET=$(openssl rand -hex 32)|" "$APP_DIR/.env"
 fi
-sed -i "s|^BASE_URL=.*|BASE_URL=https://$HOST|; s|^PORT=.*|PORT=$PORT|; s|^HOST_BIND=.*|HOST_BIND=$BIND|; s|^BACKUP_DIR=.*|BACKUP_DIR=$APP_DIR/data/backups|" "$APP_DIR/.env"
+sed -i "s|^BASE_URL=.*|BASE_URL=https://$HOST|; s|^PORT=.*|PORT=$PORT|; s|^HOST_BIND=.*|HOST_BIND=$BIND|; s|^BACKUP_DIR=.*|BACKUP_DIR=$APP_DIR/data/backups|; s|^UPLOADS_DIR=.*|UPLOADS_DIR=$APP_DIR/data/uploads|" "$APP_DIR/.env"
 sed -i "s|^DATABASE_URL=.*|DATABASE_URL=postgres://storagex:$DB_PASS@127.0.0.1:5432/storagex|" "$APP_DIR/.env"
 chown "$APP_USER:$APP_USER" "$APP_DIR/.env" && chmod 600 "$APP_DIR/.env"
 sudo -u "$APP_USER" env PATH="$NODE_BIN:/usr/bin:/bin" bash -c "cd $APP_DIR && npm install --no-audit --no-fund && npm run build && npm run migrate && npm run seed"
-sudo -u "$APP_USER" mkdir -p "$APP_DIR/data/backups"
+sudo -u "$APP_USER" mkdir -p "$APP_DIR/data/backups" "$APP_DIR/data/uploads" && chmod 700 "$APP_DIR/data/uploads"
 
 say "7/9 Service (memory-capped, low priority)"
 cat > /etc/systemd/system/storagex.service <<UNIT
@@ -330,9 +330,10 @@ esac
 
 say "9/9 Backups and the deploy key for GitHub"
 CRON1="15 2 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs backup >> data/backups/backup.log 2>&1 && find data/backups -name '*.dump' -mtime +30 -delete"
+CRON3="30 4 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs purge-files >> data/backups/purge-files.log 2>&1"
 CRON2="45 3 * * 0 cd $APP_DIR && $NODE_BIN/node dist/cli.mjs restore-check \$(ls -1t data/backups/*.dump | head -1) >> data/backups/restore-check.log 2>&1"
 # (a fresh user has no crontab yet: that is not an error)
-{ crontab -u "$APP_USER" -l 2>/dev/null | grep -v 'dist/cli.mjs backup' | grep -v 'dist/cli.mjs restore-check' || true; echo "$CRON1"; echo "$CRON2"; } | crontab -u "$APP_USER" -
+{ crontab -u "$APP_USER" -l 2>/dev/null | grep -v 'dist/cli.mjs backup' | grep -v 'dist/cli.mjs restore-check' | grep -v 'dist/cli.mjs purge-files' || true; echo "$CRON1"; echo "$CRON2"; echo "$CRON3"; } | crontab -u "$APP_USER" -
 KEY=/home/$APP_USER/.ssh/github_actions
 if [ ! -f "$KEY" ]; then
   sudo -u "$APP_USER" ssh-keygen -t ed25519 -N '' -C "github-actions-deploy" -f "$KEY" >/dev/null

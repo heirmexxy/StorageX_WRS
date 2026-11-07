@@ -5,7 +5,8 @@ import * as A from '../lib/auth';
 import { otpauthUrl } from '../lib/totp';
 import { qrDataUri } from '../lib/qr';
 import { render } from '../views/layout';
-import { LoginPage, TwoFactorPage, SetupTwoFactorPage, RecoveryCodesPage, InvitePage, ResetPage } from '../views/auth';
+import { LoginPage, TwoFactorPage, SetupTwoFactorPage, SetupSmsPage, RecoveryCodesPage, InvitePage, ResetPage } from '../views/auth';
+import { smsAllowed } from '../lib/rbac';
 
 const auditActor = (c: Ctx) => ({ userId: c.user?.id ?? null, label: `user:${c.user?.email ?? 'anonymous'}`, ip: c.ip });
 const safeNext = (n: unknown) => (typeof n === 'string' && /^\/(?!\/)[\w\-/?=&.%]*$/.test(n) ? n : '/app');
@@ -23,7 +24,7 @@ post('/login', 'public', async (c) => {
     if (c.session) await A.revokeSession(c.session.id);
     c.setSessionCookie(await A.createSession(user.id, c.ip, String(c.req.headers['user-agent'] || '')));
     const next = encodeURIComponent(safeNext(c.query.next));
-    c.redirect(user.totp_enabled ? `/login/2fa?next=${next}` : `/setup-2fa?next=${next}`);
+    c.redirect(user.factor ? `/login/2fa?next=${next}` : `/setup-2fa?next=${next}`);
   } catch (e) {
     if (e instanceof A.AuthError) return c.html(render(<LoginPage c={c} error={e.message} email={c.body.email} />), 401);
     throw e;
@@ -32,8 +33,15 @@ post('/login', 'public', async (c) => {
 
 get('/login/2fa', 'partial', (c) => {
   if (c.session!.twofaOk) return c.redirect('/app');
-  if (!c.user!.totp_enabled) return c.redirect('/setup-2fa');
+  if (!c.user!.factor) return c.redirect('/setup-2fa');
   c.html(render(<TwoFactorPage c={c} />));
+});
+
+post('/login/2fa/sms', 'partial', async (c) => {
+  if (c.session!.twofaOk) return c.redirect('/app');
+  if (c.user!.factor !== 'sms') return c.redirect('/login/2fa');
+  try { await A.sendLoginSms(c.user!.id); c.html(render(<TwoFactorPage c={c} sent />)); }
+  catch (e) { if (e instanceof A.AuthError) return c.html(render(<TwoFactorPage c={c} error={e.message} />), 429); throw e; }
 });
 
 post('/login/2fa', 'partial', async (c) => {
@@ -50,13 +58,30 @@ post('/login/2fa', 'partial', async (c) => {
 });
 
 get('/setup-2fa', 'partial', async (c) => {
-  if (c.user!.totp_enabled) return c.redirect('/login/2fa');
+  if (c.user!.factor) return c.redirect('/login/2fa');
   const secret = (await A.pendingTotpSecret(c.user!.id)) || (await A.beginTotpSetup(c.user!.id));
-  c.html(render(<SetupTwoFactorPage c={c} secret={secret} qr={qrDataUri(otpauthUrl(secret, c.user!.email))} />));
+  c.html(render(<SetupTwoFactorPage c={c} secret={secret} qr={qrDataUri(otpauthUrl(secret, c.user!.email))} smsOption={smsAllowed(c.session!.memberships)} />));
+});
+
+// SMS codes: only for low-risk roles (see rbac.smsAllowed), chosen while setting up the second step.
+const smsGate = (c: Ctx) => { if (c.user!.factor) { c.redirect('/login/2fa'); return false; } if (!smsAllowed(c.session!.memberships)) throw new HttpError(403, 'Your role needs an authenticator app.'); return true; };
+get('/setup-2fa/sms', 'partial', (c) => { if (smsGate(c)) c.html(render(<SetupSmsPage c={c} phone={c.user!.phone_e164 ?? ''} />)); });
+post('/setup-2fa/sms/send', 'partial', async (c) => {
+  if (!smsGate(c)) return;
+  try { const phone = await A.sendLoginSms(c.user!.id, c.body.phone); c.html(render(<SetupSmsPage c={c} phone={phone} sent />)); }
+  catch (e) { if (e instanceof A.AuthError) return c.html(render(<SetupSmsPage c={c} phone={c.body.phone} error={e.message} />), 400); throw e; }
+});
+post('/setup-2fa/sms', 'partial', async (c) => {
+  if (!smsGate(c)) return;
+  try {
+    const codes = await A.confirmSmsEnrolment(c.user!.id, c.body.code, auditActor(c));
+    c.setSessionCookie(await A.completeSecondFactor(c.sessionToken, auditActor(c)));
+    c.html(render(<RecoveryCodesPage c={c} codes={codes} />));
+  } catch (e) { if (e instanceof A.AuthError) return c.html(render(<SetupSmsPage c={c} sent error={e.message} />), 400); throw e; }
 });
 
 post('/setup-2fa', 'partial', async (c) => {
-  if (c.user!.totp_enabled) return c.redirect('/login/2fa');
+  if (c.user!.factor) return c.redirect('/login/2fa');
   try {
     const codes = await A.confirmTotp(c.user!.id, c.body.code, auditActor(c));
     c.setSessionCookie(await A.completeSecondFactor(c.sessionToken, auditActor(c)));

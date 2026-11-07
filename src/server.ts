@@ -7,11 +7,13 @@ import { db, openPool } from './lib/db';
 import { Ctx, HttpError } from './lib/http';
 import { match, type Guard } from './lib/router';
 import { loadSession, AuthError } from './lib/auth';
+import { UserError } from './lib/errors';
 import { can, type Permission } from './lib/rbac';
 import { render } from './views/layout';
 import { ErrorPage } from './views/auth';
 import './routes/auth';
 import './routes/admin';
+import './routes/registry';
 
 const CSP = ["default-src 'self'", "img-src 'self' data:", "style-src 'self'", "script-src 'self'", "form-action 'self'", "frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'"].join('; ');
 const STATIC: Record<string, string> = { '/app.css': 'text/css; charset=utf-8', '/favicon.ico': 'image/x-icon' };
@@ -33,7 +35,7 @@ function checkGuard(c: Ctx, guard: Guard): { redirect: string } | { status: numb
   const next = encodeURIComponent(c.path + c.url.search);
   if (!s) return { redirect: `/login?next=${next}` };
   if (guard === 'partial') return null;
-  if (!s.twofaOk) return { redirect: s.user.totp_enabled ? `/login/2fa?next=${next}` : `/setup-2fa?next=${next}` };
+  if (!s.twofaOk) return { redirect: s.user.factor ? `/login/2fa?next=${next}` : `/setup-2fa?next=${next}` };
   if (guard === 'auth') return null;
   const perm = guard.slice(5) as Permission;
   return can(s.active, perm) ? null : { status: 403, msg: 'Your role in this organisation does not allow this page.' };
@@ -70,7 +72,7 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
     await m.route.handler(c);
     if (!c.done) throw new Error(`No response from ${c.method} ${c.path}`);
   } catch (e: any) {
-    const status = e instanceof HttpError ? e.status : e instanceof AuthError ? 403 : 500;
+    const status = e instanceof HttpError ? e.status : e instanceof AuthError ? 403 : e instanceof UserError ? 400 : 500;
     if (status === 500) console.error(`[error] ${c.method} ${c.path}`, e);
     const message = status === 500 ? 'Sorry, something failed on our side. It has been logged.' : e.message;
     if (!c.done) {

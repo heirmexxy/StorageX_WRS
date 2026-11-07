@@ -76,7 +76,7 @@ export function PeoplePage({ c, members, invites, orgs, link }: { c: Ctx; member
                 <td>{m.full_name}<br /><small className="muted">{m.email}{m.status !== 'active' ? ` · ${m.status}` : ''}</small></td>
                 <td>{m.org_name}</td>
                 <td>{ROLES[m.org_kind as OrgKind]?.[m.role]?.label ?? m.role}</td>
-                <td>{m.totp_enabled ? 'On' : 'Not set'}</td>
+                <td>{m.totp_enabled ? 'App' : m.second_factor === 'sms' && m.sms_enrolled_at ? 'SMS' : 'Not set'}</td>
                 <td>{fmtDate(m.last_login_at)}</td>
                 <td className="actions">
                   {m.user_id !== c.user?.id && (
@@ -183,7 +183,7 @@ export function AccountPage({ c }: { c: Ctx }) {
       <h1>My account</h1>
       <section className="card">
         <p>{u.full_name} · {u.email}</p>
-        <p>Two-step sign-in: <strong>{u.totp_enabled ? 'on' : 'off'}</strong></p>
+        <p>Two-step sign-in: <strong>{u.factor === 'totp' ? 'authenticator app' : u.factor === 'sms' ? `text-message codes to ${u.phone_e164}` : 'not set up'}</strong></p>
         <h2>Organisations</h2>
         <ul>{c.session!.memberships.map((m) => <li key={m.org_id}>{m.org_name}: {ROLES[m.org_kind]?.[m.role]?.label ?? m.role}</li>)}</ul>
       </section>

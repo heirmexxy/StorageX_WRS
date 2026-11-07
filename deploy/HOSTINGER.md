@@ -40,3 +40,26 @@ ls -lh /srv/storagex/data/backups
 You should see a `storagex-…dump` file. Every Sunday the server restores the newest backup into a throwaway database to prove it works; results are in `data/backups/restore-check.log`.
 
 Backups on the same server do not survive losing the server. Copy them off the VPS (ComboTrader's `backup-offsite.sh` approach with Google Drive) before real lender data goes in. That is on the Build 12 checklist.
+
+## Step 8 — Turn on text messages (Termii)
+Farmer phone checks, consent codes and SMS sign-in codes need Termii. Until this is done, the server refuses to send them, and those steps show an error.
+
+1. In the Termii dashboard, copy the **API key** and the approved **Sender ID** (use the same account as ComboTrader if you like).
+2. On the server:
+   ```bash
+   sudo nano /srv/storagex/.env
+   ```
+   Set `TERMII_API_KEY=` and `TERMII_SENDER_ID=`, save (Ctrl+O, Enter, Ctrl+X).
+3. Restart:
+   ```bash
+   sudo systemctl restart storagex
+   ```
+4. Register a test farmer with your own phone and press **Text a code to the farmer**. The code should arrive within a minute.
+
+## Step 9 — Keep a copy of the settings file somewhere safe
+ID photos are encrypted with a key made from `APP_SECRET` in `/srv/storagex/.env`. If that file is lost, the photos in the backups cannot be opened.
+
+```bash
+sudo cat /srv/storagex/.env
+```
+Copy the `APP_SECRET=` line into your password manager. Do not put it in Google Drive next to the backups.

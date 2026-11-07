@@ -7,13 +7,15 @@ import { render } from '../views/layout';
 import { HomePage, PeoplePage, OrgsPage, AuditPage, AccountPage } from '../views/admin';
 import type { OrgKind } from '../lib/rbac';
 
+import { UserError } from '../lib/errors';
+
 /** Runs an admin action; AuthErrors become a message on the page the person came from. */
-async function act(c: Ctx, fallback: string, fn: () => Promise<string | void>) {
+export async function act(c: Ctx, fallback: string, fn: () => Promise<string | void>) {
   try {
     const msg = await fn();
     c.back(fallback, ['ok', msg || 'Done.']);
   } catch (e) {
-    if (e instanceof A.AuthError) return c.back(fallback, ['error', e.message]);
+    if (e instanceof UserError) return c.back(fallback, ['error', e.message]);
     throw e;
   }
 }

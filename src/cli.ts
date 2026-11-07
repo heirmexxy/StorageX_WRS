@@ -5,11 +5,13 @@
 //   backup [file]                pg_dump the database (custom format) into BACKUP_DIR
 //   restore-check <file>         restore a backup into a throwaway database and count rows (proves backups work)
 //   verify-audit                 check the audit log hash chain
+//   purge-files                  delete ID photos whose retention date has passed (run daily)
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './lib/config';
 import { closePool, db, openPool } from './lib/db';
+import { purgeExpiredFiles } from './lib/files';
 import { migrate, seed } from './lib/migrate';
 import { bootstrapSuperAdmin } from './lib/auth';
 import { verifyAuditChain } from './lib/audit';
@@ -41,6 +43,13 @@ async function main() {
       const file = args[0] || path.join(config.backupDir, `storagex-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.dump`);
       run('pg_dump', ['--format=custom', '--no-owner', '--file', file]);
       console.log(`backup written: ${file} (${(fs.statSync(file).size / 1024).toFixed(0)} KB)`);
+      // Uploaded files (already encrypted) go alongside the dump. They can only be read with this server's APP_SECRET,
+      // so keep a copy of .env somewhere safe and separate from the backups.
+      if (fs.existsSync(config.uploadsDir)) {
+        const tarFile = file.replace(/\.dump$/, '') + '.uploads.tar';
+        run('tar', ['-cf', tarFile, '-C', path.dirname(path.resolve(config.uploadsDir)), path.basename(path.resolve(config.uploadsDir))]);
+        console.log(`uploads archived: ${tarFile}`);
+      }
       break;
     }
     case 'restore-check': {
@@ -59,6 +68,10 @@ async function main() {
       }
       break;
     }
+    case 'purge-files': {
+      console.log(`removed ${await purgeExpiredFiles()} expired file(s)`);
+      break;
+    }
     case 'verify-audit': {
       const broken = await verifyAuditChain();
       console.log(broken ? `BROKEN at audit entry ${broken}` : 'audit chain intact');
@@ -66,7 +79,7 @@ async function main() {
       break;
     }
     default:
-      console.log('commands: migrate | seed | make-admin <email> <name> | backup [file] | restore-check <file> | verify-audit');
+      console.log('commands: migrate | seed | make-admin <email> <name> | backup [file] | restore-check <file> | verify-audit | purge-files');
       process.exitCode = 1;
   }
 }

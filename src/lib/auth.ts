@@ -3,13 +3,21 @@
 import { db, tx } from './db';
 import { config } from './config';
 import { audit, type AuditActor } from './audit';
-import { randomToken, sha256, hashPassword, verifyPassword, passwordProblem, encrypt, decrypt, minutesFromNow, hoursFromNow } from './util';
+import { randomToken, sha256, hashPassword, verifyPassword, passwordProblem, encrypt, decrypt, minutesFromNow, hoursFromNow, normPhone } from './util';
 import { newTotpSecret, verifyTotp } from './totp';
-import { can, canGrant, roleDef, validRole, type Membership, type OrgKind } from './rbac';
+import { can, canGrant, roleDef, validRole, smsAllowed, type Membership, type OrgKind } from './rbac';
+import { issueOtp, checkOtp } from './otp';
 
-export class AuthError extends Error { constructor(public code: string, message: string) { super(message); } }
+import { UserError } from './errors';
 
-export interface User { id: string; email: string; full_name: string; status: 'invited' | 'active' | 'suspended'; totp_enabled: boolean; phone_e164: string | null }
+export class AuthError extends UserError { constructor(public code: string, message: string) { super(message); } }
+
+export interface User {
+  id: string; email: string; full_name: string; status: 'invited' | 'active' | 'suspended'; totp_enabled: boolean; phone_e164: string | null;
+  second_factor: 'totp' | 'sms'; sms_enrolled: boolean;
+  /** The second step this person can use right now; null means they must set one up before going further. */
+  factor: 'totp' | 'sms' | null;
+}
 export interface Session { id: string; user: User; twofaOk: boolean; memberships: Membership[]; active: Membership | null; expiresAt: Date }
 export interface Actor { user: User; membership: Membership | null; ip?: string | null }
 
@@ -56,10 +64,18 @@ export async function login(emailIn: string, password: string, ip: string): Prom
   }
   await db.run('UPDATE users SET failed_logins=0, locked_until=NULL, last_login_at=now() WHERE id=$1', u.id);
   await audit(actor, 'auth.login.password_ok');
-  return publicUser(u);
+  return publicUser(u, await memberships(u.id));
 }
 
-const publicUser = (u: any): User => ({ id: u.id, email: u.email, full_name: u.full_name, status: u.status, totp_enabled: u.totp_enabled, phone_e164: u.phone_e164 });
+const publicUser = (u: any, ms?: Membership[]): User => {
+  const smsOk = u.second_factor === 'sms' && !!u.sms_enrolled_at && (!ms || smsAllowed(ms));
+  return {
+    id: u.id, email: u.email, full_name: u.full_name, status: u.status, totp_enabled: u.totp_enabled, phone_e164: u.phone_e164,
+    second_factor: u.second_factor ?? 'totp', sms_enrolled: !!u.sms_enrolled_at,
+    // SMS stops counting the moment the person gains a sensitive role; they are then sent to set up an authenticator.
+    factor: u.totp_enabled ? 'totp' : smsOk ? 'sms' : null,
+  };
+};
 
 // ---------- sessions ----------
 export async function createSession(userId: string, ip: string, ua: string) {
@@ -83,7 +99,7 @@ export async function completeSecondFactor(oldToken: string, actor: AuditActor) 
 export async function loadSession(token: string | undefined): Promise<Session | null> {
   if (!token || token.length > 100) return null;
   const s = await db.get<any>(
-    `SELECT s.*, u.email, u.full_name, u.status, u.totp_enabled, u.phone_e164 FROM sessions s JOIN users u ON u.id=s.user_id
+    `SELECT s.*, u.email, u.full_name, u.status, u.totp_enabled, u.phone_e164, u.second_factor, u.sms_enrolled_at FROM sessions s JOIN users u ON u.id=s.user_id
      WHERE s.token_hash=$1 AND s.revoked_at IS NULL`, sha256(token));
   if (!s) return null;
   const now = Date.now();
@@ -95,7 +111,7 @@ export async function loadSession(token: string | undefined): Promise<Session | 
   if (now - new Date(s.last_seen_at).getTime() > 60_000) await db.run('UPDATE sessions SET last_seen_at=now() WHERE id=$1', s.id);
   const ms = await memberships(s.user_id);
   const active = ms.find((m) => m.org_id === s.active_org_id) || ms[0] || null;
-  return { id: s.id, twofaOk: s.twofa_ok, memberships: ms, active, expiresAt: s.expires_at, user: publicUser({ ...s, id: s.user_id }) };
+  return { id: s.id, twofaOk: s.twofa_ok, memberships: ms, active, expiresAt: s.expires_at, user: publicUser({ ...s, id: s.user_id }, ms) };
 }
 
 export async function revokeSession(sessionId: string) { await db.run('UPDATE sessions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL', sessionId); }
@@ -131,14 +147,46 @@ export async function pendingTotpSecret(userId: string) {
 export async function confirmTotp(userId: string, code: string, actor: AuditActor) {
   const secret = await pendingTotpSecret(userId);
   if (!secret || !verifyTotp(secret, code)) throw new AuthError('code', 'That code did not match. Check the time on your phone and try the newest code.');
-  const codes = Array.from({ length: 10 }, () => randomToken(6).replace(/[-_]/g, 'x').slice(0, 8).toLowerCase());
-  await tx(async () => {
-    await db.run('UPDATE users SET totp_enabled=true, updated_at=now() WHERE id=$1', userId);
-    await db.run('DELETE FROM recovery_codes WHERE user_id=$1', userId);
-    for (const c of codes) await db.run('INSERT INTO recovery_codes (user_id, code_hash) VALUES ($1,$2)', userId, sha256(c));
+  return tx(async () => {
+    await db.run(`UPDATE users SET totp_enabled=true, second_factor='totp', updated_at=now() WHERE id=$1`, userId);
+    const codes = await newRecoveryCodes(userId);
     await audit(actor, 'auth.2fa.enabled', { entity: 'user', entityId: userId });
+    return codes;
   });
+}
+
+async function newRecoveryCodes(userId: string) {
+  const codes = Array.from({ length: 10 }, () => randomToken(6).replace(/[-_]/g, 'x').slice(0, 8).toLowerCase());
+  await db.run('DELETE FROM recovery_codes WHERE user_id=$1', userId);
+  for (const c of codes) await db.run('INSERT INTO recovery_codes (user_id, code_hash) VALUES ($1,$2)', userId, sha256(c));
   return codes;
+}
+
+// ---------- SMS second step (low-risk roles only) ----------
+export async function sendLoginSms(userId: string, phoneIn?: string) {
+  const ms = await memberships(userId);
+  if (!smsAllowed(ms)) throw new AuthError('forbidden', 'Your role needs an authenticator app; SMS codes are not allowed for it.');
+  const u = await db.get<{ phone_e164: string | null; sms_enrolled_at: Date | null; second_factor: string }>('SELECT phone_e164, sms_enrolled_at, second_factor FROM users WHERE id=$1', userId);
+  // While enrolling, the person gives the number; afterwards codes only go to the number on the account.
+  const enrolled = u?.second_factor === 'sms' && !!u.sms_enrolled_at;
+  const phone = enrolled ? u!.phone_e164 : normPhone(phoneIn);
+  if (!phone) throw new AuthError('input', 'Enter a Nigerian mobile number, e.g. 08031234567.');
+  try { await issueOtp('login_sms', userId, phone, (c) => `StorageX sign-in code: ${c}. Never share it; Kitovu will never ask for it. Expires in 10 minutes.`); }
+  catch (e: any) { throw new AuthError('sms', e.message); }
+  return phone;
+}
+
+/** Confirms the first SMS code, switches the account to SMS codes and returns 10 recovery codes. */
+export async function confirmSmsEnrolment(userId: string, code: string, actor: AuditActor) {
+  if (!smsAllowed(await memberships(userId))) throw new AuthError('forbidden', 'Your role needs an authenticator app.');
+  const r = await checkOtp('login_sms', userId, code);
+  if (!r.ok) throw new AuthError('code', r.reason);
+  return tx(async () => {
+    await db.run(`UPDATE users SET second_factor='sms', sms_enrolled_at=now(), phone_e164=$2, updated_at=now() WHERE id=$1`, userId, r.phone);
+    const codes = await newRecoveryCodes(userId);
+    await audit(actor, 'auth.2fa.sms_enabled', { entity: 'user', entityId: userId });
+    return codes;
+  });
 }
 
 export async function verifySecondFactor(userId: string, codeIn: string, actor: AuditActor) {
@@ -146,6 +194,10 @@ export async function verifySecondFactor(userId: string, codeIn: string, actor: 
   const code = String(codeIn || '').trim().toLowerCase().replace(/\s/g, '');
   const enc = await db.val<string | null>('SELECT totp_secret_enc FROM users WHERE id=$1 AND totp_enabled', userId);
   if (enc && /^\d{6}$/.test(code) && verifyTotp(decrypt(enc), code)) return true;
+  if (!enc && /^\d{6}$/.test(code)) {
+    const u = await db.get<any>('SELECT second_factor, sms_enrolled_at FROM users WHERE id=$1', userId);
+    if (u?.second_factor === 'sms' && u.sms_enrolled_at && smsAllowed(await memberships(userId)) && (await checkOtp('login_sms', userId, code)).ok) return true;
+  }
   if (/^[a-z0-9]{8}$/.test(code)) {
     const n = await db.run('UPDATE recovery_codes SET used_at=now() WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL', userId, sha256(code));
     if (n) { await audit(actor, 'auth.2fa.recovery_code_used', { entity: 'user', entityId: userId }); return true; }
@@ -243,7 +295,7 @@ export async function listPeople(a: Actor) {
   if (!a.membership || !can(a.membership, 'users.manage')) throw new AuthError('forbidden', 'You cannot manage people.');
   const scope = a.membership.org_kind === 'kitovu' ? null : a.membership.org_id;
   const members = await db.all<any>(
-    `SELECT m.id AS membership_id, m.role, m.created_at, u.id AS user_id, u.email, u.full_name, u.status, u.totp_enabled, u.last_login_at,
+    `SELECT m.id AS membership_id, m.role, m.created_at, u.id AS user_id, u.email, u.full_name, u.status, u.totp_enabled, u.second_factor, u.sms_enrolled_at, u.last_login_at,
             o.id AS org_id, o.name AS org_name, o.kind::text AS org_kind
      FROM memberships m JOIN users u ON u.id=m.user_id JOIN organisations o ON o.id=m.org_id
      WHERE m.status='active' AND ($1::uuid IS NULL OR m.org_id=$1) ORDER BY o.name, u.full_name`, scope);
@@ -276,7 +328,7 @@ export async function setUserStatus(a: Actor, userId: string, status: 'active' |
 export async function reset2fa(a: Actor, userId: string) {
   if (userId === a.user.id || !(await authorityOver(a, userId))) throw new AuthError('forbidden', 'You cannot reset that person’s two-step sign-in.');
   await tx(async () => {
-    await db.run('UPDATE users SET totp_enabled=false, totp_secret_enc=NULL, updated_at=now() WHERE id=$1', userId);
+    await db.run(`UPDATE users SET totp_enabled=false, totp_secret_enc=NULL, second_factor='totp', sms_enrolled_at=NULL, updated_at=now() WHERE id=$1`, userId);
     await db.run('DELETE FROM recovery_codes WHERE user_id=$1', userId);
     await audit(actorOf(a), 'auth.2fa.reset', { entity: 'user', entityId: userId });
   });

@@ -6,6 +6,7 @@ export const PERMISSIONS = [
   'users.manage', 'orgs.manage', 'audit.view', 'settings.manage',
   'farmers.view', 'farmers.edit', 'field_partners.manage',
   'warehouses.view', 'warehouses.edit', 'stock.manage',
+  'kyc.review', 'farmers.verify_account',
   'receipts.view', 'receipts.issue',
   'finance.view', 'finance.approve', 'finance.configure',
   'reports.view',
@@ -21,14 +22,14 @@ export const ROLES: Record<OrgKind, Record<string, RoleDef>> = {
     super_admin: { label: 'Super admin', perms: ALL },
     ops_manager: { label: 'Operations manager', perms: ['users.manage', 'audit.view', 'farmers.view', 'farmers.edit', 'field_partners.manage', 'warehouses.view', 'warehouses.edit', 'stock.manage', 'receipts.view', 'receipts.issue', 'finance.view', 'reports.view'] },
     finance: { label: 'Finance', perms: ['audit.view', 'farmers.view', 'warehouses.view', 'receipts.view', 'finance.view', 'finance.approve', 'finance.configure', 'reports.view'] },
-    compliance: { label: 'Compliance', perms: ['audit.view', 'farmers.view', 'warehouses.view', 'receipts.view', 'finance.view', 'reports.view'] },
+    compliance: { label: 'Compliance', perms: ['audit.view', 'kyc.review', 'farmers.view', 'warehouses.view', 'receipts.view', 'finance.view', 'reports.view'] },
     field_supervisor: { label: 'Field supervisor', perms: ['farmers.view', 'farmers.edit', 'field_partners.manage', 'warehouses.view', 'stock.manage', 'receipts.view', 'receipts.issue'] },
     viewer: { label: 'Viewer', perms: ['farmers.view', 'warehouses.view', 'receipts.view', 'finance.view', 'reports.view'] },
   },
   lender: {
-    lender_admin: { label: 'Lender admin', perms: ['users.manage', 'audit.view', 'warehouses.view', 'receipts.view', 'finance.view', 'finance.approve', 'finance.configure', 'reports.view'] },
-    credit_officer: { label: 'Credit officer', perms: ['warehouses.view', 'receipts.view', 'finance.view', 'finance.approve', 'reports.view'] },
-    lender_viewer: { label: 'Viewer', perms: ['warehouses.view', 'receipts.view', 'finance.view', 'reports.view'] },
+    lender_admin: { label: 'Lender admin', perms: ['users.manage', 'audit.view', 'farmers.view', 'farmers.verify_account', 'warehouses.view', 'receipts.view', 'finance.view', 'finance.approve', 'finance.configure', 'reports.view'] },
+    credit_officer: { label: 'Credit officer', perms: ['farmers.view', 'farmers.verify_account', 'warehouses.view', 'receipts.view', 'finance.view', 'finance.approve', 'reports.view'] },
+    lender_viewer: { label: 'Viewer', perms: ['farmers.view', 'warehouses.view', 'receipts.view', 'finance.view', 'reports.view'] },
   },
   warehouse_operator: {
     warehouse_manager: { label: 'Warehouse manager', perms: ['users.manage', 'audit.view', 'warehouses.view', 'stock.manage', 'receipts.view'] },
@@ -70,4 +71,13 @@ export function canGrant(m: Membership | null | undefined, kind: OrgKind, target
   if (kind === 'kitovu' && role === 'super_admin') return m.org_kind === 'kitovu' && m.role === 'super_admin';
   const mine = new Set(permsOf(m));
   return def.perms.every((p) => mine.has(p));
+}
+
+/**
+ * SMS codes are allowed as the second step only for low-risk roles: never for Kitovu staff, and never for a role
+ * that can manage people, approve money, issue receipts or review identity. Every membership must qualify.
+ */
+const SENSITIVE: Permission[] = ['users.manage', 'orgs.manage', 'settings.manage', 'audit.view', 'finance.approve', 'finance.configure', 'receipts.issue', 'kyc.review'];
+export function smsAllowed(ms: Membership[]) {
+  return ms.length > 0 && ms.every((m) => m.org_kind !== 'kitovu' && !permsOf(m).some((p) => SENSITIVE.includes(p)));
 }
