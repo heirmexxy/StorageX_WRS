@@ -40,11 +40,13 @@ post('/api/intake/farmer-code/verify', 'perm:stock.manage', (c) => api(c, async 
   ({ token: await I.verifyConfirmCode(c.actor, String(c.body.farmer_code ?? ''), String(c.body.intake_id ?? ''), String(c.body.otp ?? '')) })));
 
 // ---------- review on the main site ----------
-get('/intakes', 'perm:stock.manage', async (c) => {
+get('/intakes', 'auth', async (c) => {
+  seeDeliveries(c);
   const q = c.query;
   c.html(render(<IntakesPage c={c} rows={await I.listIntakes(c.actor, { status: q.status, warehouse: q.warehouse })} q={q} />));
 });
-get('/intakes/:ref', 'perm:stock.manage', async (c) => {
+get('/intakes/:ref', 'auth', async (c) => {
+  seeDeliveries(c);
   const i = await I.intakeByRef(c.actor, c.params.ref);
   if (!i) throw new HttpError(404, 'No delivery with that reference.');
   const issue = c.membership?.org_kind === 'kitovu' && can(c.membership, 'receipts.issue') || i.status === 'accepted'
@@ -53,6 +55,14 @@ get('/intakes/:ref', 'perm:stock.manage', async (c) => {
     : undefined;
   c.html(render(<IntakePage c={c} i={i} issue={issue} />));
 });
+// Compliance sees deliveries (to clear holds) without operating stock.
+function seeDeliveries(c: any) {
+  if (!(can(c.membership, 'stock.manage') || (c.membership?.org_kind === 'kitovu' && can(c.membership, 'kyc.review')))) throw new HttpError(403, 'You cannot see deliveries.');
+}
+post('/intakes/:ref/clear', 'perm:kyc.review', (c) => act(c, `/intakes/${c.params.ref}`, async () => {
+  await I.clearHold(c.actor, c.params.ref, c.body.note);
+  return 'Cleared. Operations can now accept it.';
+}));
 post('/intakes/:ref/review', 'perm:stock.manage', (c) => act(c, `/intakes/${c.params.ref}`, async () => {
   const d = c.body.decision === 'accept' ? 'accept' : c.body.decision === 'reject' ? 'reject' : 'hold';
   await I.reviewIntake(c.actor, c.params.ref, d, c.body.note);

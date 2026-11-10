@@ -4,6 +4,7 @@ import type { Farmer, Issue, FieldPartner, Warehouse } from '../lib/registry';
 import { mask } from '../lib/registry';
 import { ID_TYPES, REJECT_REASONS, CONSENT_TEXT, type Submission } from '../lib/kyc';
 import { Page, Csrf, Field, Select, fmtDate, fmtDay } from './layout';
+import { EXPLAIN } from '../lib/agents/data-steward';
 
 type Opt = { code: string; name: string };
 const LEVEL = ['Registered', 'ID checked', 'Lender verified'];
@@ -385,7 +386,7 @@ export function IssueTable({ c, rows, showRecord }: { c: Ctx; rows: Issue[]; sho
         <tr key={i.id}>
           {showRecord && <td>{i.link ? <a href={i.link}>{i.label}</a> : i.label ?? i.legacy_ref}<br /><small className="muted">{i.entity.replace('_', ' ')}</small></td>}
           <td><span className={`badge ${i.severity === 'info' ? '' : 'warn'}`}>{i.severity}</span> {i.code.replace(/_/g, ' ')}</td>
-          <td>{i.detail}{i.resolved_at && <><br /><small className="muted">{`Resolved ${fmtDay(i.resolved_at)}: ${i.resolved_by}`}</small></>}</td>
+          <td>{i.detail}{EXPLAIN[i.code] && !i.resolved_at && <><br /><small className="muted">{EXPLAIN[i.code]}</small></>}{i.resolved_at && <><br /><small className="muted">{`Resolved ${fmtDay(i.resolved_at)}: ${i.resolved_by}`}</small></>}</td>
           <td>{!i.resolved_at && i.severity !== 'info' && (
             <form method="post" action={`/review/${i.id}/resolve`} className="row"><Csrf c={c} /><input name="note" placeholder="How it was resolved" aria-label="Resolution" required /><button>Resolve</button></form>
           )}</td>
@@ -395,15 +396,21 @@ export function IssueTable({ c, rows, showRecord }: { c: Ctx; rows: Issue[]; sho
   );
 }
 
-export function ReviewQueuePage({ c, rows, q }: { c: Ctx; rows: Issue[]; q: Record<string, string> }) {
+export function ReviewQueuePage({ c, rows, q, run }: { c: Ctx; rows: Issue[]; q: Record<string, string>; run?: any }) {
   const open = rows.filter((r) => !r.resolved_at && r.severity !== 'info').length;
   return (
     <Page c={c} title="Review queue">
       <h1>Review queue</h1>
-      <p className="muted">Records from the old StorageX system that need a person to confirm something, plus anything the system flags later. {open} open.</p>
+      <p className="muted">Records from the old StorageX system that need a person to confirm something, plus what the data steward finds in its daily check. {open} open.</p>
+      <form method="post" action="/review/steward-run" className="row card">
+        <Csrf c={c} />
+        <span>{run ? `Data steward last checked ${fmtDate(run.finished_at)}: ${run.opened} new, ${run.closed} fixed since the run before, ${run.still_open} open.` : 'The data steward has not run yet.'}
+          <br /><small className="muted">It closes its own items once the problem is fixed. Resolve one by hand only if it is not a problem (for example, two farmers who really share a name); it will not be raised again.</small></span>
+        <button>Check now</button>
+      </form>
       <form className="filters card" method="get">
         <select name="entity" defaultValue={q.entity ?? ''} aria-label="Record type">
-          <option value="">All records</option><option value="farmer">Farmers</option><option value="field_partner">Field partners</option><option value="warehouse">Warehouses</option><option value="insurance_policy">Insurance</option><option value="receipt">Receipts</option>
+          <option value="">All records</option><option value="farmer">Farmers</option><option value="field_partner">Field partners</option><option value="warehouse">Warehouses</option><option value="insurance_policy">Insurance</option><option value="receipt">Receipts</option><option value="user">User accounts</option>
         </select>
         <label className="check"><input type="checkbox" name="info" value="1" defaultChecked={q.info === '1'} /> Include notes</label>
         <label className="check"><input type="checkbox" name="resolved" value="1" defaultChecked={q.resolved === '1'} /> Include resolved</label>

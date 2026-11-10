@@ -6,6 +6,7 @@ import { config } from '../config';
 import { audit, systemActor } from '../audit';
 import { fileRow, readFile } from '../files';
 import { getSettings } from '../settings';
+import { inspect } from './intake-inspector';
 import { defaultModel, imagePart, jsonFrom, type ModelCall } from './model';
 
 export const PROMPT_VERSION = 'intake-displays-1';
@@ -24,7 +25,7 @@ export function compare(entered: number, read: number | null, kind: 'scale' | 'm
 
 export async function screenIntake(intakeId: string, call: ModelCall | null = defaultModel()) {
   if ((await getSettings())['intake.ai_check'] === 'off' || config.kycAiMode === 'off') return null;
-  const i = await db.get<any>('SELECT id, ref, weighings, moisture_pct::float AS moisture, flags FROM intakes WHERE id=$1', intakeId);
+  const i = await db.get<any>('SELECT id, ref, status, hold_cleared_by, weighings, moisture_pct::float AS moisture, flags FROM intakes WHERE id=$1', intakeId);
   if (!i) return null;
   if (!call) { await db.run(`UPDATE intakes SET ai_check=$2 WHERE id=$1`, intakeId, JSON.stringify({ status: 'skipped', reason: 'No ANTHROPIC_API_KEY on this server' })); return null; }
   const photos = await db.all<{ idx: number; kind: string; file_id: string; sha256: string }>(`SELECT idx, kind, file_id, sha256 FROM intake_photos WHERE intake_id=$1 AND kind IN ('scale','moisture') ORDER BY idx`, intakeId);
@@ -49,10 +50,12 @@ export async function screenIntake(intakeId: string, call: ModelCall | null = de
     const unreadable = readings.filter((x) => x.result === 'unreadable');
     const check = { status: 'done', model: config.aiModel, prompt: PROMPT_VERSION, readings, concerns: (j.concerns || []).slice(0, 5).map((c: unknown) => String(c).slice(0, 200)), tokens: [r.tin, r.tout] };
     const flags = (i.flags as any[]).filter((f) => !['display_mismatch', 'display_unreadable'].includes(f.code));
-    if (bad.length) flags.push({ code: 'display_mismatch', severity: 'hold', detail: bad.map((b) => `${b.label}: typed ${b.entered}, photo shows ${b.read}`).join('; ') });
+    const late = i.status === 'accepted' && !i.hold_cleared_by;
+    if (bad.length) flags.push({ code: 'display_mismatch', severity: late ? 'review' : 'hold', detail: (late ? 'Found after acceptance: ' : '') + bad.map((b) => `${b.label}: typed ${b.entered}, photo shows ${b.read}`).join('; ') });
     else if (unreadable.length) flags.push({ code: 'display_unreadable', severity: 'review', detail: `${unreadable.length} display photo(s) could not be read: check them by eye.` });
     await db.run('UPDATE intakes SET ai_check=$2, flags=$3 WHERE id=$1', intakeId, JSON.stringify(check), JSON.stringify(flags));
     await audit(systemActor('intake-screen'), 'intake.ai_checked', { entity: 'intake', entityId: intakeId, data: { ref: i.ref, mismatches: bad.length, unreadable: unreadable.length } });
+    await inspect(intakeId);   // a mismatch puts the delivery on hold like any other serious flag
     return bad.length ? 'mismatch' : unreadable.length ? 'unreadable' : 'match';
   } catch (e: any) {
     await db.run(`UPDATE intakes SET ai_check=$2 WHERE id=$1`, intakeId, JSON.stringify({ status: 'failed', error: String(e?.message || e).slice(0, 300) }));

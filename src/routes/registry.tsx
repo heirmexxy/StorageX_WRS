@@ -18,6 +18,7 @@ import { screenSubmission } from '../lib/agents/kyc-screen';
 import * as S from '../lib/settings';
 import * as N from '../lib/notify';
 import * as U from '../lib/ussd';
+import * as DS from '../lib/agents/data-steward';
 import { config } from '../lib/config';
 import { SettingsPage } from '../views/settings';
 
@@ -109,8 +110,13 @@ get('/files/:id', 'auth', async (c) => {
 // ---------- review queue ----------
 get('/review', 'perm:farmers.edit', async (c) => {
   const q = c.query;
-  c.html(render(<ReviewQueuePage c={c} q={q} rows={await R.openIssues(c.actor, { entity: q.entity, includeInfo: q.info === '1', includeResolved: q.resolved === '1' })} />));
+  c.html(render(<ReviewQueuePage c={c} q={q} rows={await R.openIssues(c.actor, { entity: q.entity, includeInfo: q.info === '1', includeResolved: q.resolved === '1' })} run={await DS.lastRun()} />));
 });
+post('/review/steward-run', 'perm:farmers.edit', (c) => act(c, '/review', async () => {
+  if (c.membership?.org_kind !== 'kitovu') throw new UserError('Kitovu only.');
+  const r = await DS.runSteward(`user:${c.user!.email}`);
+  return `Checked: ${r.opened} new, ${r.closed} fixed, ${r.open} open.`;
+}));
 post('/review/:id/resolve', 'auth', (c) => act(c, '/review', async () => { await R.resolveIssue(c.actor, c.params.id, c.body.note); return 'Resolved.'; }));
 
 // ---------- field partners ----------

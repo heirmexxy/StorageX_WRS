@@ -333,10 +333,11 @@ CRON1="15 2 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs backup >> data/back
 CRON4="15 5 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs revalue >> data/backups/revalue.log 2>&1"
 # Mid-morning, so reminders do not arrive before dawn (09:10 UTC is 10:10 in Lagos).
 CRON5="10 9 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs remind >> data/backups/remind.log 2>&1"
+CRON6="40 4 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs steward >> data/backups/steward.log 2>&1"
 CRON3="30 4 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs purge-files >> data/backups/purge-files.log 2>&1"
 CRON2="45 3 * * 0 cd $APP_DIR && $NODE_BIN/node dist/cli.mjs restore-check \$(ls -1t data/backups/*.dump | head -1) >> data/backups/restore-check.log 2>&1"
 # (a fresh user has no crontab yet: that is not an error)
-{ crontab -u "$APP_USER" -l 2>/dev/null | grep -v 'dist/cli.mjs backup' | grep -v 'dist/cli.mjs restore-check' | grep -v 'dist/cli.mjs purge-files' | grep -v 'dist/cli.mjs revalue' | grep -v 'dist/cli.mjs remind' || true; echo "$CRON1"; echo "$CRON2"; echo "$CRON3"; echo "$CRON4"; echo "$CRON5"; } | crontab -u "$APP_USER" -
+{ crontab -u "$APP_USER" -l 2>/dev/null | grep -v 'dist/cli.mjs backup' | grep -v 'dist/cli.mjs restore-check' | grep -v 'dist/cli.mjs purge-files' | grep -v 'dist/cli.mjs revalue' | grep -v 'dist/cli.mjs remind' | grep -v 'dist/cli.mjs steward' || true; echo "$CRON1"; echo "$CRON2"; echo "$CRON3"; echo "$CRON4"; echo "$CRON5"; echo "$CRON6"; } | crontab -u "$APP_USER" -
 KEY=/home/$APP_USER/.ssh/github_actions
 if [ ! -f "$KEY" ]; then
   sudo -u "$APP_USER" ssh-keygen -t ed25519 -N '' -C "github-actions-deploy" -f "$KEY" >/dev/null

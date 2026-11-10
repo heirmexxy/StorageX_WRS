@@ -7,6 +7,7 @@
 //   verify-audit                 check the audit log hash chain
 //   revalue                      value every live receipt for today (run daily)
 //   remind                       text farmers whose loans fall due soon or were missed (run daily)
+//   steward                      data steward: find and close registry problems (run daily)
 //   purge-files                  delete ID photos whose retention date has passed (run daily)
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -16,6 +17,7 @@ import { closePool, db, openPool } from './lib/db';
 import { purgeExpiredFiles } from './lib/files';
 import { revalueAll } from './lib/valuation';
 import { sendReminders } from './lib/notify';
+import { runSteward } from './lib/agents/data-steward';
 import { migrate, seed } from './lib/migrate';
 import { bootstrapSuperAdmin } from './lib/auth';
 import { verifyAuditChain } from './lib/audit';
@@ -72,6 +74,11 @@ async function main() {
       }
       break;
     }
+    case 'steward': {
+      const r = await runSteward('cron');
+      console.log(`data steward: ${r.opened} opened, ${r.closed} closed, ${r.open} open`, r.byCode);
+      break;
+    }
     case 'remind': {
       const r = await sendReminders();
       console.log(`reminders sent: ${r.soon} due soon, ${r.overdue} overdue`);
@@ -94,7 +101,7 @@ async function main() {
       break;
     }
     default:
-      console.log('commands: migrate | seed | make-admin <email> <name> | backup [file] | restore-check <file> | verify-audit | purge-files | revalue | remind');
+      console.log('commands: migrate | seed | make-admin <email> <name> | backup [file] | restore-check <file> | verify-audit | purge-files | revalue | remind | steward');
       process.exitCode = 1;
   }
 }

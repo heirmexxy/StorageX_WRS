@@ -28,6 +28,8 @@ import * as SL from '../src/lib/settlement';
 import * as Tw from '../src/lib/tower';
 import * as N from '../src/lib/notify';
 import * as U from '../src/lib/ussd';
+import * as INS from '../src/lib/agents/intake-inspector';
+import * as DS from '../src/lib/agents/data-steward';
 import { reviewLine } from '../src/lib/agents/batch-review';
 import { verify as sigVerify } from '../src/lib/sign';
 import { screenIntake } from '../src/lib/agents/intake-screen';
@@ -457,7 +459,7 @@ async function main() {
     const r1 = makeRecord(ops);
     const out = await I.ingest(ops, r1.json, r1.files, { deviceClock: new Date().toISOString() });
     eq(out.result, 'stored'); firstRef = out.ref;
-    eq(out.flags.map((f) => f.code), [], 'clean delivery has no flags');
+    eq(out.flags.map((f) => f.code).filter((c) => !['night_capture', 'clerk_burst'].includes(c)), [], 'clean delivery has no flags (apart from ones that depend on the time the tests run)');
     const row = await db.get<any>('SELECT net_kg::float AS net, bags FROM intakes WHERE id=$1', r1.rec.id);
     eq(row.net, 1000.5); eq(row.bags, 10);
     eq((await I.ingest(ops, r1.json, r1.files)).result, 'duplicate');
@@ -533,6 +535,7 @@ async function main() {
     const rec = { ...r.rec, device_id: crypto.randomUUID(), prev_hash: null }; rec.evidence_hash = I.recordHash(rec);
     await rejects(I.ingest(clerk2, JSON.stringify(rec), r.files));
   });
+
 
   console.log('\nReceipts and the Receipt Passport');
   await t('splitting a delivery into lots keeps every kilo and bag', () => {
@@ -682,6 +685,55 @@ async function main() {
     eq((await Rc.receiptByNo(admin, no))!.status, 'issued');
     ok(await Rc.chainOk(r.id));
   });
+
+  const withPhoto = (r: { rec: any; files: Record<string, any> }, from: { files: Record<string, any> }, sha: string) => {
+    r.rec.weighings[0].photo = sha; r.rec.evidence_hash = I.recordHash(r.rec);
+    if (lastHash !== null && seq === r.rec.device_seq) lastHash = r.rec.evidence_hash;
+    r.files['p_' + sha] = from.files['p_' + sha];
+    const used = JSON.stringify(r.rec);
+    for (const k of Object.keys(r.files)) if (!used.includes(k.slice(2))) delete r.files[k];
+    return JSON.stringify(r.rec);
+  };
+  let insRef = '';
+  await t('intake inspector: a photo used twice holds the delivery; compliance clears it, then operations accept', async () => {
+    const a = makeRecord(ops, { weighings: [{ bags: 12, gross_kg: 1302.5, photo: '' }] });
+    const aSha = Object.keys(a.files)[0].slice(2);
+    const aJson = withPhoto(a, a, aSha);
+    eq((await I.ingest(ops, aJson, a.files)).result, 'stored');
+    const b = makeRecord(ops, { stack_ref: 'INS-1', weighings: [{ bags: 15, gross_kg: 1777.5, photo: '' }] });
+    const out = await I.ingest(ops, withPhoto(b, a, aSha), b.files);
+    ok(out.flags.some((f) => f.code === 'photo_reused' && f.severity === 'hold'), JSON.stringify(out.flags));
+    eq(out.status, 'held');
+    insRef = out.ref;
+    const i = (await I.intakeByRef(admin, insRef))!;
+    ok(i.inspection.version === INS.VERSION && i.inspection.checks.includes('farmer_two_places'));
+    ok(String(i.review_note).includes('intake inspector'));
+    await rejects(I.reviewIntake(admin, insRef, 'accept', 'looks fine to me'));
+    await rejects(I.clearHold(admin, insRef, 'short'));
+    await rejects(I.clearHold(ops, insRef, 'I recorded it and it is fine, honestly'));
+    await rejects(db.run(`UPDATE intakes SET status='accepted', reviewed_by=$2, reviewed_at=now() WHERE ref=$1`, insRef, admin.user.id));
+    await rejects(db.run(`UPDATE intakes SET net_kg=1 WHERE ref=$1`, insRef));
+    await I.clearHold(compliance, insRef, 'Called the farmer: two deliveries that day, clerk reused the scale photo by mistake.');
+    await rejects(I.clearHold(compliance, insRef, 'Called the farmer again and it is still fine.'));
+    eq((await I.intakeByRef(admin, insRef))!.status, 'submitted');
+    await I.reviewIntake(admin, insRef, 'accept', 'Compliance cleared it; stock seen in B3');
+    eq((await I.intakeByRef(admin, insRef))!.status, 'accepted');
+    await rejects(db.run(`UPDATE intakes SET hold_cleared_by=NULL WHERE ref=$1`, insRef));
+  });
+  await t('intake inspector: more stock than the warehouse holds is held; copied weights are flagged', async () => {
+    const cap = await db.val(`SELECT capacity_kg FROM warehouses WHERE id=$1`, wh.id);
+    await db.run(`UPDATE warehouses SET capacity_kg=2000 WHERE id=$1`, wh.id);
+    try {
+      const r = makeRecord(ops, { weighings: [{ bags: 20, gross_kg: 2310.5, photo: '' }] });
+      const out = await I.ingest(ops, withPhoto(r, r, Object.keys(r.files)[0].slice(2)), r.files);
+      ok(out.flags.some((f) => f.code === 'over_capacity'), JSON.stringify(out.flags)); eq(out.status, 'held');
+    } finally { await db.run(`UPDATE warehouses SET capacity_kg=$2 WHERE id=$1`, wh.id, cap); }
+    const other = (await db.val<string>(`SELECT code FROM farmers WHERE code<>$1 AND status='active' ORDER BY code LIMIT 1`, ada))!;
+    const r2 = makeRecord(ops, { farmer_code: other, weighings: [{ bags: 15, gross_kg: 1777.5, photo: '' }] });
+    const out2 = await I.ingest(ops, withPhoto(r2, r2, Object.keys(r2.files)[0].slice(2)), r2.files);
+    ok(out2.flags.some((f) => f.code === 'repeated_weights' && f.severity === 'review'), JSON.stringify(out2.flags));
+  });
+
 
   console.log('\nValuation');
   await t('median, unit conversion and rounding never over-lend', () => {
@@ -986,6 +1038,36 @@ async function main() {
     await rejects(U.handleCallback(ops, cb.id, ''));
     await U.handleCallback(ops, cb.id, 'Called, explained the loan balance');
     eq((await U.openCallbacks()).filter((x) => x.code === ada).length, 0);
+  });
+
+  console.log('\nAgents: data steward');
+  await t('data steward opens one item per problem, closes it when fixed, and respects a person’s judgement', async () => {
+    const madu = await R.createFarmer(ops, { full_name: 'Madu Okafor', phone: '08055550123', state_code: 'NI' });
+    await db.run(`UPDATE farmers SET full_name='Madu' WHERE code=$1`, madu);   // as some legacy records are
+    const first = await DS.runSteward('test');
+    ok(first.opened > 0, JSON.stringify(first));
+    eq((await DS.runSteward('test')).opened, 0, 'running again changes nothing');
+    const maduId = (await R.farmerByCode(ops, madu))!.id;
+    const mine = () => db.all<any>(`SELECT * FROM data_issues WHERE source='steward' AND entity_id=$1 AND resolved_at IS NULL`, maduId);
+    ok((await mine()).some((x) => x.code === 'farmer_single_name'));
+    ok((await R.farmerByCode(ops, madu))!.needs_review);
+    await db.run(`UPDATE farmers SET full_name='Madu Okafor' WHERE id=$1`, maduId);
+    const r = await DS.runSteward('test');
+    ok(r.closed >= 1); eq((await mine()).length, 0);
+    ok(!(await R.farmerByCode(ops, madu))!.needs_review, 'review flag cleared once nothing is left');
+    // An agent registering farmers on their own phone.
+    const fp = (await db.get<any>(`SELECT id FROM field_partners WHERE status='active' LIMIT 1`))!;
+    await db.run(`UPDATE field_partners SET phone_e164='+2348055550123' WHERE id=$1`, fp.id);
+    await DS.runSteward('test');
+    const shared = (await db.get<any>(`SELECT * FROM data_issues WHERE source='steward' AND entity_id=$1 AND code='field_partner_shares_farmer_phone' AND resolved_at IS NULL`, fp.id))!;
+    eq(shared.severity, 'blocker');
+    // A person says it is fine; the same finding is not raised again.
+    await R.resolveIssue(ops, String(shared.id), 'Agent is the farmer’s son; phone confirmed in person');
+    await DS.runSteward('test');
+    ok(!(await db.get(`SELECT 1 FROM data_issues WHERE source='steward' AND entity_id=$1 AND code='field_partner_shares_farmer_phone' AND resolved_at IS NULL`, fp.id)), 'not reopened');
+    const issues = await R.openIssues(ops, { includeInfo: true });
+    ok(issues.some((x: any) => x.source === 'steward'));
+    eq((await DS.lastRun())!.started_by, 'test');
   });
 
   console.log('\nPartner applications');

@@ -1,4 +1,5 @@
 import type { Ctx } from '../lib/http';
+import { can } from '../lib/rbac';
 import type { Flag } from '../lib/intake';
 import { Page, Csrf, fmtDate } from './layout';
 
@@ -48,6 +49,7 @@ export function IntakePage({ c, i, issue }: { c: Ctx; i: any; issue?: { blockers
   const kitovu = c.membership?.org_kind === 'kitovu';
   const photo = (sha: string) => i.photos.find((p: any) => p.sha256 === sha);
   const ai = i.ai_check;
+  const holds = (i.flags as Flag[]).filter((f) => f.severity === 'hold').length;
   const map = i.lat ? `https://www.openstreetmap.org/?mlat=${i.lat}&mlon=${i.lng}#map=16/${i.lat}/${i.lng}` : null;
   return (
     <Page c={c} title={i.ref}>
@@ -108,7 +110,17 @@ export function IntakePage({ c, i, issue }: { c: Ctx; i: any; issue?: { blockers
       <section className="card">
         <h2>Decision</h2>
         {i.reviewed_at && <p>{`${i.status} by ${i.reviewer} on ${fmtDate(i.reviewed_at)}${i.review_note ? ` — ${i.review_note}` : ''}`}</p>}
-        {kitovu && ['submitted', 'held'].includes(i.status) && (i.clerk_user_id === c.user?.id
+        {!i.reviewed_at && i.status === 'held' && i.review_note && <p className="flash error">{i.review_note}</p>}
+        {holds > 0 && (i.hold_cleared_by
+          ? <p className="flash ok">{`Serious flags cleared by ${i.clearer} (compliance) on ${fmtDate(i.hold_cleared_at)}: ${i.hold_clear_note}`}</p>
+          : can(c.membership, 'kyc.review') && kitovu && ['submitted', 'held'].includes(i.status) && i.clerk_user_id !== c.user?.id ? (
+            <form method="post" action={`/intakes/${i.ref}/clear`} className="row">
+              <Csrf c={c} />
+              <input name="note" required minLength={15} placeholder="What you checked (photos, a call to the farmer, the clerk) and why it is genuine" aria-label="Clearance note" />
+              <button className="primary">Clear for acceptance</button>
+            </form>
+          ) : <p className="flash info">{`${holds} serious flag${holds > 1 ? 's' : ''}: compliance must check and clear this delivery before it can be accepted. If it is not genuine, reject it.`}</p>)}
+        {kitovu && can(c.membership, 'stock.manage') && ['submitted', 'held'].includes(i.status) && (i.clerk_user_id === c.user?.id
           ? <p className="flash info">You recorded this delivery, so a colleague must review it.</p>
           : (
             <form method="post" action={`/intakes/${i.ref}/review`} className="row">

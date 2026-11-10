@@ -2,6 +2,13 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-11 (Build 11)
+
+1. **The intake inspector compares each delivery with everything before it.** Checks: a photo already used on another delivery; the same farmer at another warehouse within 6 hours; more stock than the warehouse holds; six or more records from one clerk within 15 minutes; scale readings identical to another farmer's delivery; the same moisture typed ten times running; far more than the farmer usually brings, or over 30 tonnes in 30 days (Settings); night-time capture; all-round readings. Each finding is explained in plain words. Rules are in code, so every hold can be explained to a farmer, a clerk or an auditor; the AI's part stays the display reading from Build 3.
+2. **Serious findings put the delivery on hold automatically**, and so do the serious per-record flags from Build 3 (moisture over limit, far from the warehouse, possible duplicate, missing records from the phone). A held delivery needs **compliance** to look into it and clear it with a written note, then **operations** to accept it: two people besides the clerk, in two roles. The database refuses an accepted delivery with an uncleared serious flag, and a clearance cannot be removed once given.
+3. **Late findings** (for example an AI reading that finishes after acceptance) are shown for follow-up but cannot undo an acceptance.
+4. **The data steward runs daily** (and on demand from the review queue). It finds likely duplicate farmers, single names, missing states, farmers with stock but no confirmed phone, deliveries waiting on identity checks, inactive farmers owning stock, field partners whose phone is on farmer records, warehouses with no location, capacity, insurance or recent count, and accounts unused for 90 days. It opens one review item per problem, closes it when the problem is gone, and does not raise again something a person has marked as not a problem.
+
 ## 2026-11-11 (Build 10)
 
 1. **One place sends every farmer text**, from wording Kitovu can edit, and logs each one (sent, failed, or skipped with the reason). The same message is never sent twice for the same event. Texts go only to confirmed phones.

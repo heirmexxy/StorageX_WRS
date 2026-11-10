@@ -35,6 +35,8 @@ export const DEFAULTS = {
   /** Due-date reminders to farmers: this many days before, on the day after it is missed. Event texts always go. */
   'notify.reminders': true,
   'notify.due_days': 7,
+  /** The intake inspector asks for a check when one farmer delivers more than this in 30 days. */
+  'inspector.farmer_30d_kg': 30000,
   /** USSD status menu for farmers. The code is the one the network assigns, e.g. *347*123#. */
   'ussd.enabled': true,
   'ussd.code': '',
@@ -61,6 +63,7 @@ export const LABELS: Record<SettingKey, string> = {
   'fees.sale_commission_bp': 'Sale commission (basis points: 150 = 1.5%)',
   'notify.reminders': 'Text farmers before a loan is due and when it is missed',
   'notify.due_days': 'Send the due-date reminder this many days before',
+  'inspector.farmer_30d_kg': 'Flag a farmer who delivers more than this in 30 days (kg)',
   'ussd.enabled': 'Farmers can check their status by USSD',
   'ussd.code': 'USSD code shown in texts (blank until the network assigns one)',
 };
@@ -88,7 +91,7 @@ export async function saveSettings(a: Actor, input: Partial<Record<SettingKey, u
     }
     else if (typeof def === 'number') {
       const v = Number(input[k]);
-      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000], 'notify.due_days': [1, 30] } as Record<string, number[]>)[k] ?? [1, 180];
+      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000], 'notify.due_days': [1, 30], 'inspector.farmer_30d_kg': [1000, 1000000] } as Record<string, number[]>)[k] ?? [1, 180];
       if (!Number.isFinite(v) || v < lo || v > hi) throw new UserError(`${LABELS[k]}: between ${lo} and ${hi}.`);
       next[k] = v;
     }

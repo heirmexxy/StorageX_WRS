@@ -10,6 +10,7 @@ import { UserError } from './errors';
 import { saveFile, sniff } from './files';
 import { issueOtp, checkOtp } from './otp';
 import { notifyFarmer as notify } from './notify';
+import { inspect } from './agents/intake-inspector';
 import { getSettings } from './settings';
 import { hmac, clean } from './util';
 import { placeIntake } from './stock';
@@ -183,7 +184,7 @@ export async function ingest(a: Actor, recordJson: string, files: Record<string,
     f.id, wh.id, com.code, net, captured.toISOString());
   if (dup) add('possible_duplicate', `Looks like ${dup} (same farmer, commodity and weight within a day).`, 'hold');
 
-  return tx(async () => {
+  const stored = await tx(async () => {
     // Phone chain: catches records deleted or altered on the phone before upload.
     await db.run(`INSERT INTO intake_devices (id, first_user_id, user_agent) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING`, rec.device_id, a.user.id, clean(o.userAgent, 200));
     const dev = (await db.get<{ last_seq: number; last_hash: string | null }>('SELECT last_seq, last_hash FROM intake_devices WHERE id=$1 FOR UPDATE', rec.device_id))!;
@@ -210,6 +211,10 @@ export async function ingest(a: Actor, recordJson: string, files: Record<string,
     await audit(actorOf(a), 'intake.uploaded', { orgId: a.membership!.org_id, entity: 'intake', entityId: rec.id, data: { ref, warehouse: wh.code, farmer: f.code, net_kg: net, flags: flags.map((x) => x.code) } });
     return { result: 'stored' as const, ref, status: 'submitted', flags, farmer: f, net, commodity: com.name, warehouse: wh.name };
   });
+  // The inspector compares it with history straight away; anything serious puts it on hold for compliance.
+  const ins = await inspect(rec.id);
+  if (!ins) return stored;
+  return { ...stored, status: ins.held ? 'held' : stored.status, flags: [...stored.flags.filter((x) => !ins.found.some((y) => y.code === x.code)), ...ins.found] };
 }
 
 /** After upload: tell the farmer what was recorded, so a wrong record is disputed early. */
@@ -234,9 +239,9 @@ export async function intakeByRef(a: Actor, ref: string) {
   const scope = isKitovu(a) ? null : a.membership!.org_id;
   const i = await db.get<any>(
     `SELECT i.*, i.net_kg::float AS net, i.gross_kg::float AS gross, f.code AS farmer_code, f.full_name AS farmer_name, f.kyc_level, w.code AS wh_code, w.name AS wh_name,
-            w.lat::float AS wh_lat, w.lng::float AS wh_lng, c.name AS commodity, c.max_moisture_pct::float AS max_moisture, u.full_name AS clerk, ru.full_name AS reviewer
+            w.lat::float AS wh_lat, w.lng::float AS wh_lng, c.name AS commodity, c.max_moisture_pct::float AS max_moisture, u.full_name AS clerk, ru.full_name AS reviewer, cu.full_name AS clearer
      FROM intakes i JOIN farmers f ON f.id=i.farmer_id JOIN warehouses w ON w.id=i.warehouse_id JOIN commodities c ON c.code=i.commodity_code
-       JOIN users u ON u.id=i.clerk_user_id LEFT JOIN users ru ON ru.id=i.reviewed_by
+       JOIN users u ON u.id=i.clerk_user_id LEFT JOIN users ru ON ru.id=i.reviewed_by LEFT JOIN users cu ON cu.id=i.hold_cleared_by
      WHERE i.ref=upper($1) AND ($2::uuid IS NULL OR w.operator_org_id=$2)`, clean(ref, 30), scope);
   if (!i) return undefined;
   i.photos = await db.all('SELECT idx, kind, file_id, sha256 FROM intake_photos WHERE intake_id=$1 ORDER BY idx', i.id);
@@ -252,6 +257,7 @@ export async function reviewIntake(a: Actor, ref: string, decision: 'accept' | '
   const n = clean(note, 500);
   if (decision !== 'accept' && n.length < 3) throw new UserError('Say why.');
   const holds = (i.flags as Flag[]).filter((f) => f.severity === 'hold');
+  if (decision === 'accept' && holds.length && !i.hold_cleared_by) throw new UserError(`This delivery has ${holds.length} serious flag(s). Compliance must check and clear it before it can be accepted.`);
   if (decision === 'accept' && holds.length && n.length < 3) throw new UserError(`This delivery has ${holds.length} serious flag(s). Explain in the note why it is acceptable.`);
   const status = { accept: 'accepted', hold: 'held', reject: 'rejected' }[decision];
   await tx(async () => {
@@ -260,6 +266,23 @@ export async function reviewIntake(a: Actor, ref: string, decision: 'accept' | '
     if (status === 'accepted') await placeIntake(a.user.id, { id: i.id, warehouse_id: i.warehouse_id, commodity_code: i.commodity_code, net_kg: i.net, bags: i.bags, stack_ref: i.stack_ref });
     await audit(actorOf(a), `intake.${status}`, { entity: 'intake', entityId: i.id, data: { ref: i.ref, note: n || null } });
   });
+}
+
+/** Compliance looks into a held delivery (photos, the farmer, the clerk) and clears it for operations to accept.
+ *  It does not accept it: operations still review and accept, so a hold always needs two people besides the clerk. */
+export async function clearHold(a: Actor, ref: string, note: string) {
+  if (!isKitovu(a) || !can(a.membership, 'kyc.review')) throw new UserError('Only Kitovu compliance clears a held delivery.');
+  const i = await intakeByRef(a, ref);
+  if (!i) throw new UserError('Delivery not found.');
+  if (i.clerk_user_id === a.user.id) throw new UserError('You recorded this delivery, so someone else must clear it.');
+  if (i.hold_cleared_by) throw new UserError('Already cleared.');
+  if (!['submitted', 'held'].includes(i.status)) throw new UserError(`This delivery is already ${i.status}.`);
+  const holds = (i.flags as Flag[]).filter((f) => f.severity === 'hold');
+  if (!holds.length) throw new UserError('There is nothing serious to clear.');
+  const n = clean(note, 500);
+  if (n.length < 15) throw new UserError('Say what you checked and why it is genuine (at least a sentence).');
+  await db.run(`UPDATE intakes SET hold_cleared_by=$2, hold_cleared_at=now(), hold_clear_note=$3, status='submitted' WHERE id=$1`, i.id, a.user.id, n);
+  await audit(actorOf(a), 'intake.hold_cleared', { entity: 'intake', entityId: i.id, data: { ref: i.ref, flags: holds.map((h) => h.code), note: n } });
 }
 
 export const deliveriesOf = (farmerId: string) => db.all(

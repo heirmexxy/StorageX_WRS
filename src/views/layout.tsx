@@ -12,6 +12,7 @@ const NAV: { href: string; label: string; perm?: Permission; kitovu?: boolean }[
   { href: '/farmers', label: 'Farmers', perm: 'farmers.view' },
   { href: '/kyc/review', label: 'ID checks', perm: 'kyc.review' },
   { href: '/review', label: 'Review queue', perm: 'farmers.edit', kitovu: true },
+  { href: '/intakes?status=held', label: 'Held deliveries', perm: 'kyc.review', kitovu: true },
   { href: '/field-partners', label: 'Field partners', perm: 'field_partners.manage' },
   { href: '/intakes', label: 'Deliveries', perm: 'stock.manage' },
   { href: '/receipts', label: 'Receipts', perm: 'receipts.view' },
