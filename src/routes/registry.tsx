@@ -16,6 +16,8 @@ import { deliveriesOf } from '../lib/intake';
 import { can } from '../lib/rbac';
 import { screenSubmission } from '../lib/agents/kyc-screen';
 import * as S from '../lib/settings';
+import * as N from '../lib/notify';
+import * as U from '../lib/ussd';
 import { config } from '../lib/config';
 import { SettingsPage } from '../views/settings';
 
@@ -48,6 +50,7 @@ async function farmerView(c: Ctx, extra: Partial<FarmerView> = {}) {
     consents: c.membership?.org_kind === 'lender' ? [] : await K.consentsFor(f.id),
     verifs: await K.verificationsFor(c.actor, f.id),
     deliveries: c.membership?.org_kind === 'lender' ? [] : await deliveriesOf(f.id),
+    messaging: c.membership?.org_kind === 'lender' ? undefined : { msgs: await N.messagesOf(f.id), ussd: await U.ussdStatus(f.id), languages: N.LANGUAGES },
     issues: kit && can(c.membership, 'farmers.edit') ? await R.openIssues(c.actor, { entity: 'farmer', entityId: f.id, includeInfo: true, includeResolved: true }) : [],
     ...extra,
   };
@@ -55,6 +58,9 @@ async function farmerView(c: Ctx, extra: Partial<FarmerView> = {}) {
   return v;
 }
 get('/farmers/:code', 'perm:farmers.view', async (c) => c.html(render(<FarmerPage c={c} v={await farmerView(c)} />)));
+const farmerId = async (c: Ctx) => { const f = await R.farmerByCode(c.actor, c.params.code); if (!f) throw new HttpError(404, 'No farmer with that code, or you cannot see them.'); return f.id; };
+post('/farmers/:code/messaging', 'perm:farmers.edit', async (c) => act(c, `/farmers/${c.params.code}`, async () => { await N.setFarmerMessaging(c.actor, await farmerId(c), c.body); return 'Message settings saved.'; }));
+post('/farmers/:code/ussd-reset', 'perm:farmers.edit', async (c) => act(c, `/farmers/${c.params.code}`, async () => { await U.resetPin(c.actor, await farmerId(c), c.body.reason); return 'PIN reset. The farmer has been sent a text.'; }));
 
 /** For steps that render the farmer page again (code entry), rather than redirecting. */
 async function onFarmer(c: Ctx, fn: () => Promise<Partial<FarmerView> | void>, okMsg?: string) {

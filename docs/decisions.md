@@ -2,6 +2,16 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-11 (Build 10)
+
+1. **One place sends every farmer text**, from wording Kitovu can edit, and logs each one (sent, failed, or skipped with the reason). The same message is never sent twice for the same event. Texts go only to confirmed phones.
+2. **Texts about deliveries, receipts, releases, loans and payments always go**: they are how a farmer spots a mistake or fraud. Only due-date reminders can be switched off, for everyone in Settings or for one farmer.
+3. **Translations need a second person.** Kitovu staff propose wording for Pidgin, Hausa, Yoruba or Igbo; someone else approves it. The wording must keep the amounts and references the farmer needs to check, and must say it is from StorageX. Until a language is approved, those farmers get English. StorageX ships English only, because a wrong translation of a money message is worse than English: translations should come from native speakers on the team.
+4. **Reminders** go a set number of days before a loan is due (7 by default) and the day after it is missed, once each, only while something is owed.
+5. **USSD (Africa's Talking format)** lets any phone check produce, loans, sales and prices, and ask Kitovu to call back. It is in English for now (screens are short and fixed). The farmer chooses a 4-digit PIN the first time (easy ones refused); three wrong PINs lock it for 24 hours. Only Kitovu operations staff can reset a PIN, with a note on how they confirmed it was the farmer; the farmer gets a text when it happens. The PIN, the keypad text and the phone number are never logged.
+6. **A shared family phone** shows a choice of whose record, then that person's PIN.
+7. **The gateway is trusted only through a secret key in its address**; without the key, USSD is off in production.
+
 ## 2026-11-07 (Build 9)
 
 1. **Lenders start in a control tower**, not the loans list. It answers, in order: what we are owed and what stands behind it; what needs a decision today; which loans are past the lender's own warning or liquidation level, overdue, without a price, or due within 14 days; where the stock is and whether its warehouse checks are clean; and how concentrated the book is by warehouse, crop and state.

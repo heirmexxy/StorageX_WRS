@@ -8,7 +8,7 @@ import { actorOf, rateLimit, type Actor } from './auth';
 import { can } from './rbac';
 import { config } from './config';
 import { UserError } from './errors';
-import { sendSms } from './sms';
+import { notifyFarmer as notify } from './notify';
 import { getSettings } from './settings';
 import { sign, verify, keyId } from './sign';
 import { Pdf } from './pdf';
@@ -151,9 +151,8 @@ export async function issueFromIntake(a: Actor, intakeId: string, split = '') {
 
 export async function notifyIssued(r: Awaited<ReturnType<typeof issueFromIntake>>) {
   const f = r.farmer;
-  if (!f.phone_e164 || !f.phone_verified_at || !(await getSettings())['phone_check.sms']) return;
   const list = r.receipts.map((x) => `${x.no} (${x.kg.toLocaleString('en-NG')} kg)`).join(', ');
-  await sendSms(f.phone_e164, `StorageX: receipt ${list} issued for your ${r.commodity} at ${f.wh_name}. Check any time: ${verifyUrl({ verify_token: r.receipts[0].token, signature: null })}`).catch(() => null);
+  await notify(f.farmer_id, 'receipt_issued', r.receipts[0].no, { receipts: list, crop: r.commodity, warehouse: f.wh_name, link: verifyUrl({ verify_token: r.receipts[0].token, signature: null }) });
 }
 
 export async function cancelReceipt(a: Actor, no: string, reason: string) {

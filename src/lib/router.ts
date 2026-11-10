@@ -7,7 +7,7 @@ import type { Ctx } from './http';
 import type { Permission } from './rbac';
 
 export type Handler = (c: Ctx) => unknown | Promise<unknown>;
-export type Guard = 'public' | 'partial' | 'auth' | `perm:${Permission}`;
+export type Guard = 'public' | 'webhook' | 'partial' | 'auth' | `perm:${Permission}`;
 export interface Route { method: string; re: RegExp; keys: string[]; guard: Guard; handler: Handler }
 
 const routes: Route[] = [];

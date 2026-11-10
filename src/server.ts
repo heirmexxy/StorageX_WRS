@@ -21,6 +21,7 @@ import './routes/valuation';
 import './routes/loans';
 import './routes/sales';
 import './routes/tower';
+import './routes/messages';
 
 const CSP = ["default-src 'self'", "img-src 'self' data:", "style-src 'self'", "script-src 'self'", "form-action 'self'", "frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'"].join('; ');
 const STATIC: Record<string, string> = {
@@ -42,7 +43,7 @@ function securityHeaders(res: http.ServerResponse) {
 
 /** Returns null when allowed, otherwise what to do instead. */
 function checkGuard(c: Ctx, guard: Guard): { redirect: string } | { status: number; msg: string } | null {
-  if (guard === 'public') return null;
+  if (guard === 'public' || guard === 'webhook') return null;  // webhooks check their own key
   const s = c.session;
   const next = encodeURIComponent(c.path + c.url.search);
   if (!s) return { redirect: `/login?next=${next}` };
@@ -83,7 +84,7 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
     if (g && 'redirect' in g) return c.redirect(g.redirect);
     if (g) throw new HttpError(g.status, g.msg);
     await c.readBody();
-    c.checkCsrf();
+    if (m.route.guard !== 'webhook') c.checkCsrf();
     await m.route.handler(c);
     if (!c.done) throw new Error(`No response from ${c.method} ${c.path}`);
   } catch (e: any) {

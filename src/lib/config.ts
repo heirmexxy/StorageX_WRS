@@ -25,6 +25,8 @@ export const config = {
   // 'dnd' reaches numbers on the Do-Not-Disturb list (most OTPs need it); 'generic' does not.
   termiiChannel: env('TERMII_CHANNEL', 'dnd'),
   termiiVoicePath: env('TERMII_VOICE_PATH', '/api/sms/otp/call'),
+  // USSD gateway (Africa's Talking format). The gateway calls /ussd/at?key=<this>; without it USSD is off in production.
+  ussdKey: env('USSD_KEY'),
   // AI pre-check of identity submissions. 'assist' = findings shown to the human reviewer; 'off' = none.
   kycAiMode: env('KYC_AI_MODE', 'assist'),
   anthropicKey: env('ANTHROPIC_API_KEY'),

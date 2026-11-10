@@ -9,7 +9,7 @@ import { can } from './rbac';
 import { UserError } from './errors';
 import { saveFile, sniff } from './files';
 import { issueOtp, checkOtp } from './otp';
-import { sendSms } from './sms';
+import { notifyFarmer as notify } from './notify';
 import { getSettings } from './settings';
 import { hmac, clean } from './util';
 import { placeIntake } from './stock';
@@ -213,9 +213,8 @@ export async function ingest(a: Actor, recordJson: string, files: Record<string,
 }
 
 /** After upload: tell the farmer what was recorded, so a wrong record is disputed early. */
-export async function notifyFarmer(r: { farmer: { phone_e164: string | null; phone_verified_at: Date | null }; ref: string; net: number; commodity: string; warehouse: string }) {
-  if (!r.farmer.phone_e164 || !r.farmer.phone_verified_at || !(await getSettings())['phone_check.sms']) return;
-  await sendSms(r.farmer.phone_e164, `StorageX: ${r.warehouse} recorded ${r.net.toLocaleString('en-NG')} kg ${r.commodity} from you (ref ${r.ref}). If this is wrong, call Kitovu.`).catch(() => null);
+export async function notifyFarmer(r: { farmer: { id: string }; ref: string; net: number; commodity: string; warehouse: string }) {
+  await notify(r.farmer.id, 'intake_recorded', r.ref, { warehouse: r.warehouse, kg: r.net.toLocaleString('en-NG'), crop: r.commodity, ref: r.ref });
 }
 
 // ---------- review ----------

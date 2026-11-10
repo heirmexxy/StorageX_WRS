@@ -10,7 +10,7 @@ import { actorOf, type Actor } from './auth';
 import { can } from './rbac';
 import { UserError } from './errors';
 import { toKobo, fmtNGN, bpOf } from './money';
-import { sendSms } from './sms';
+import { notifyFarmer as notify } from './notify';
 import { getSettings } from './settings';
 import { clean } from './util';
 import { policyFor, referencePrice, compute } from './valuation';
@@ -246,8 +246,7 @@ export async function disburse(a: Actor, loanNo: string, i: { reference?: string
     }
     await audit(actorOf(a), 'loan.disbursed', { orgId: ln.lender_org_id, entity: 'loan', entityId: ln.id, data: { loan_no: ln.loan_no, kobo: ln.principal, due } });
   });
-  if (ln.phone_e164 && ln.phone_verified_at && (await getSettings())['phone_check.sms'])
-    await sendSms(ln.phone_e164, `StorageX: ${ln.lender} has sent your loan ${ln.loan_no} of ${fmtNGN(ln.principal, { decimals: false })} against your stored produce. Due ${due}. Your receipts stay pledged until it is repaid.`).catch(() => null);
+  await notify(ln.farmer_id, 'loan_disbursed', ln.loan_no, { lender: ln.lender, loan: ln.loan_no, amount: fmtNGN(ln.principal, { decimals: false }), due });
 }
 
 export async function cancelLoan(a: Actor, loanNo: string, reason: string) {
@@ -313,7 +312,7 @@ export async function repay(a: Actor, loanNo: string, i: { amount?: string; on?:
   if (kind === 'waiver' && clean(i.note).length < 5) throw new UserError('Explain the waiver.');
   const before = position(ln, await entriesOf(ln.id), on);
   if (amount > before.outstanding + 100) throw new UserError(`That is more than the ${fmtNGN(before.outstanding)} owed on that date.`);
-  return tx(async () => {
+  const res = await tx(async () => {
     await db.run(`INSERT INTO loan_entries (loan_id, kind, amount_kobo, on_date, reference, note, recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`, ln.id, kind, Math.min(amount, before.outstanding), ymd(on), ref || null, clean(i.note, 300) || null, a.user.id);
     const after = position(ln, await entriesOf(ln.id));
     let closed = false;
@@ -325,6 +324,9 @@ export async function repay(a: Actor, loanNo: string, i: { amount?: string; on?:
     await audit(actorOf(a), `loan.${kind}`, { orgId: ln.lender_org_id, entity: 'loan', entityId: ln.id, data: { kobo: amount, closed } });
     return { closed, outstanding: after.outstanding };
   });
+  if (kind === 'repayment') await notify(ln.farmer_id, res.closed ? 'loan_closed' : 'loan_repayment', `${ln.loan_no}:${ref}`,
+    { lender: ln.lender, loan: ln.loan_no, amount: fmtNGN(Math.min(amount, before.outstanding)), owed: fmtNGN(res.outstanding) });
+  return res;
 }
 
 // ---------- views, margin watch, NCR ----------

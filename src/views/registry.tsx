@@ -91,6 +91,7 @@ export interface FarmerView {
   codeSent?: 'phone' | 'consent'; consentLender?: string;
   pm: { required: boolean; sms: boolean; voice: boolean; attested: boolean };
   deliveries: any[];
+  messaging?: { msgs: any[]; ussd: any; languages: Record<string, string> };
 }
 
 export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
@@ -258,6 +259,36 @@ export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
                 <td>{`${Number(d.net).toLocaleString('en-NG')} kg`}</td><td>{d.warehouse}</td><td>{fmtDay(d.captured_at)}</td><td>{d.status}</td></tr>
             ))}</tbody>
           </table>
+        </section>
+      )}
+
+      {v.messaging && (
+        <section className="card">
+          <h2>Messages and USSD</h2>
+          <p className="muted small">{v.messaging.ussd?.ussd_pin_set_at ? `USSD PIN set ${fmtDay(v.messaging.ussd.ussd_pin_set_at)}${v.messaging.ussd.last_used ? `, last used ${fmtDay(v.messaging.ussd.last_used)}` : ', not used yet'}.` : 'No USSD PIN yet: the farmer chooses one the first time they dial.'}
+            {v.messaging.ussd?.ussd_locked_until && new Date(v.messaging.ussd.ussd_locked_until) > new Date() ? ' Locked after wrong PINs.' : ''}</p>
+          {edit && (
+            <form method="post" action={`/farmers/${f.code}/messaging`} className="inline">
+              <Csrf c={c} />
+              <label className="field"><span>Language for texts</span><select name="language" defaultValue={v.messaging.ussd?.language ?? 'en'}>{Object.entries(v.messaging.languages).map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select>
+                <small>Texts go in English until Kitovu approves wording in this language.</small></label>
+              <label className="check"><input type="hidden" name="reminders" value="0" /><input type="checkbox" name="reminders" value="1" defaultChecked={v.messaging.ussd?.sms_reminders ?? true} /> Send due-date reminders</label>
+              <button>Save</button>
+            </form>
+          )}
+          {kitovu(c) && edit && (v.messaging.ussd?.ussd_pin_set_at || v.messaging.ussd?.ussd_locked_until) && (
+            <form method="post" action={`/farmers/${f.code}/ussd-reset`} className="inline">
+              <Csrf c={c} />
+              <label className="field"><span>Reset USSD PIN</span><input name="reason" required placeholder="How you confirmed it is the farmer asking" /></label>
+              <button>Reset PIN</button>
+            </form>
+          )}
+          {v.messaging.msgs.length ? (
+            <table>
+              <thead><tr><th>Sent</th><th>Message</th><th>Status</th></tr></thead>
+              <tbody>{v.messaging.msgs.map((m, k) => <tr key={k}><td>{fmtDate(m.created_at)}</td><td className="small">{m.body}</td><td>{m.status === 'sent' ? 'Sent' : <span className="badge warn">{`${m.status}: ${m.error ?? ''}`}</span>}</td></tr>)}</tbody>
+            </table>
+          ) : <p className="muted">No messages yet.</p>}
         </section>
       )}
 

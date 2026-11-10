@@ -32,6 +32,12 @@ export const DEFAULTS = {
   'fees.storage_kobo_per_kg_month': 300,
   'fees.handling_kobo_per_kg': 100,
   'fees.sale_commission_bp': 150,
+  /** Due-date reminders to farmers: this many days before, on the day after it is missed. Event texts always go. */
+  'notify.reminders': true,
+  'notify.due_days': 7,
+  /** USSD status menu for farmers. The code is the one the network assigns, e.g. *347*123#. */
+  'ussd.enabled': true,
+  'ussd.code': '',
 };
 export type SettingKey = keyof typeof DEFAULTS;
 export type Settings = typeof DEFAULTS;
@@ -53,6 +59,10 @@ export const LABELS: Record<SettingKey, string> = {
   'fees.storage_kobo_per_kg_month': 'Storage fee (kobo per kg per month)',
   'fees.handling_kobo_per_kg': 'Handling fee (kobo per kg, in and out)',
   'fees.sale_commission_bp': 'Sale commission (basis points: 150 = 1.5%)',
+  'notify.reminders': 'Text farmers before a loan is due and when it is missed',
+  'notify.due_days': 'Send the due-date reminder this many days before',
+  'ussd.enabled': 'Farmers can check their status by USSD',
+  'ussd.code': 'USSD code shown in texts (blank until the network assigns one)',
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -71,9 +81,14 @@ export async function saveSettings(a: Actor, input: Partial<Record<SettingKey, u
     const def = DEFAULTS[k];
     if (typeof def === 'boolean') next[k] = input[k] === true || input[k] === '1' || input[k] === 'on';
     else if (k === 'kyc.ai_mode' || k === 'intake.ai_check' || k === 'loans.ai_note') next[k] = input[k] === 'off' ? 'off' : 'assist';
+    else if (typeof def === 'string') {
+      const v = String(input[k] ?? '').replace(/\s+/g, '');
+      if (k === 'ussd.code' && v && !/^\*\d{2,4}(\*\d{1,5})*#$/.test(v)) throw new UserError('USSD code: like *347*123#, or blank.');
+      next[k] = v;
+    }
     else if (typeof def === 'number') {
       const v = Number(input[k]);
-      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000] } as Record<string, number[]>)[k] ?? [1, 180];
+      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000], 'notify.due_days': [1, 30] } as Record<string, number[]>)[k] ?? [1, 180];
       if (!Number.isFinite(v) || v < lo || v > hi) throw new UserError(`${LABELS[k]}: between ${lo} and ${hi}.`);
       next[k] = v;
     }

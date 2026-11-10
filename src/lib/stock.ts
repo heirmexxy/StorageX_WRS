@@ -7,7 +7,7 @@ import { actorOf, type Actor } from './auth';
 import { can } from './rbac';
 import { UserError } from './errors';
 import { saveFile } from './files';
-import { sendSms } from './sms';
+import { notifyFarmer as notify } from './notify';
 import { getSettings } from './settings';
 import { clean } from './util';
 import type { Upload } from './http';
@@ -247,7 +247,7 @@ export async function releaseByRef(a: Actor, ref: string) {
   needStock(a);
   const x = await db.get<any>(
     `SELECT x.*, x.kg_ordered::float AS ordered, x.kg_loaded::float AS loaded, r.receipt_no, r.id AS rid, r.status::text AS receipt_status, r.warehouse_id, r.commodity_code,
-       c.name AS commodity, w.name AS wh_name, w.operator_org_id, f.full_name AS owner, f.code AS owner_code, f.phone_e164, f.phone_verified_at, u.full_name AS orderer, lu.full_name AS loader
+       c.name AS commodity, w.name AS wh_name, w.operator_org_id, f.id AS farmer_id, f.full_name AS owner, f.code AS owner_code, f.phone_e164, f.phone_verified_at, u.full_name AS orderer, lu.full_name AS loader
      FROM releases x JOIN receipts r ON r.id=x.receipt_id JOIN commodities c ON c.code=r.commodity_code JOIN warehouses w ON w.id=r.warehouse_id
        LEFT JOIN farmers f ON f.id=r.owner_farmer_id JOIN users u ON u.id=x.ordered_by LEFT JOIN users lu ON lu.id=x.loaded_by WHERE x.ref=upper($1)`, clean(ref, 30));
   if (!x || (!isKitovu(a) && x.operator_org_id !== a.membership!.org_id)) return undefined;
@@ -293,8 +293,7 @@ export async function confirmLoading(a: Actor, ref: string, i: { stack?: string;
 
 export async function notifyRelease(r: Awaited<ReturnType<typeof confirmLoading>>) {
   const x = r.x;
-  if (!x.phone_e164 || !x.phone_verified_at || !(await getSettings())['phone_check.sms']) return;
-  await sendSms(x.phone_e164, `StorageX: ${Number(x.ordered).toLocaleString('en-NG')} kg ${x.commodity} released from ${x.wh_name} on receipt ${x.receipt_no} (${x.ref}), collected by ${x.collector_name}. ${r.closed ? 'The receipt is now closed.' : `Still held: ${r.remaining.toLocaleString('en-NG')} kg.`} If this is wrong, call Kitovu now.`).catch(() => null);
+  await notify(x.farmer_id, r.closed ? 'release_closed' : 'release', x.ref, { kg: Number(x.ordered).toLocaleString('en-NG'), crop: x.commodity, warehouse: x.wh_name, receipt: x.receipt_no, ref: x.ref, collector: x.collector_name, left: r.remaining.toLocaleString('en-NG') });
 }
 
 export async function cancelRelease(a: Actor, ref: string, note: string) {

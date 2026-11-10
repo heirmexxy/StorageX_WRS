@@ -15,7 +15,7 @@ import { UserError } from './errors';
 import { toKobo, fmtNGN, bpOf, valueKobo } from './money';
 import { saveFile } from './files';
 import { issueOtp, checkOtp } from './otp';
-import { sendSms } from './sms';
+import { notifyFarmer as notify } from './notify';
 import { getSettings } from './settings';
 import { clean } from './util';
 import { receiptBalance } from './stock';
@@ -296,8 +296,7 @@ export async function markPaid(a: Actor, lineId: string, reference: string) {
   if (/^\d{10}$/.test(ref)) throw new UserError('That looks like an account number. Enter the transfer reference instead.');
   await db.run('UPDATE settlement_lines SET paid_ref=$2, paid_at=now(), paid_by=$3 WHERE id=$1', lineId, ref, a.user.id);
   await audit(actorOf(a), 'settlement.paid', { entity: 'settlement_line', entityId: lineId, data: { party: l.party, kobo: Number(l.amount_kobo), ref } });
-  if (l.party === 'farmer' && l.phone_e164 && l.phone_verified_at && (await getSettings())['phone_check.sms'])
-    await sendSms(l.phone_e164, `StorageX: ${fmtNGN(Number(l.amount_kobo))} from sale ${l.ref} has been sent to you (ref ${ref}). Your statement is available from your Kitovu field partner.`).catch(() => null);
+  if (l.party === 'farmer' && l.farmer_id) await notify(l.farmer_id, 'sale_paid', `${l.ref}:${lineId}`, { amount: fmtNGN(Number(l.amount_kobo)), sale: l.ref, ref });
 }
 
 // ---------- views ----------

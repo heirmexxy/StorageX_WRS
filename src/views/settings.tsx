@@ -55,6 +55,14 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats }: { c: Ctx; s: 
             <label className="field" key={k}><span>{LABELS[k]}</span><input name={k} type="number" step="1" defaultValue={String(s[k])} /></label>
           ))}
         </section>
+        <section className="card">
+          <h2>Farmer messages and USSD</h2>
+          <p className="muted">Texts about deliveries, receipts, loans, releases and payments always go: they are how a farmer spots a mistake or fraud. Reminders can be switched off here or for one farmer. Wording and translations are under <a href="/admin/messages">Farmer messages</a>.</p>
+          {box('notify.reminders')}
+          <label className="field"><span>{LABELS['notify.due_days']}</span><input name="notify.due_days" type="number" min="1" max="30" defaultValue={String(s['notify.due_days'])} /></label>
+          {box('ussd.enabled')}
+          <label className="field"><span>{LABELS['ussd.code']}</span><input name="ussd.code" defaultValue={s['ussd.code']} placeholder="*347*123#" /></label>
+        </section>
         <button className="primary">Save settings</button>
       </form>
     </Page>

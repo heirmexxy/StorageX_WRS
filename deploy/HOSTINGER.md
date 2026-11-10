@@ -77,3 +77,14 @@ Copy the `APP_SECRET=` line into your password manager. Do not put it in Google 
 3. When the app shows the warehouse list, open Chrome's menu (⋮) and tap **Add to Home screen**.
 4. Turn on airplane mode and open the app from the home screen. It should open and show **Offline**.
 5. Record a test delivery, turn airplane mode off, and keep the app open. Within a minute the record should show **Uploaded** and appear under **Deliveries** on the main site.
+
+## Step 12 — Turn on the farmer USSD menu (Africa's Talking)
+A USSD code takes a few weeks to get, because the networks have to approve it. Start early; everything else works without it.
+1. Make a random key on the server: `openssl rand -hex 24`. Copy it.
+2. `sudo nano /srv/storagex/.env` and add `USSD_KEY=` followed by the key. Save, then `sudo systemctl restart storagex`.
+3. In the Africa's Talking dashboard, open **USSD → Create channel** and apply for a code (a shared code such as `*347*123#` is quicker and cheaper than your own).
+4. Set the callback URL to `https://<your domain>/ussd/at?key=<the key from step 1>`.
+5. Test it in the Africa's Talking simulator with the phone number of a farmer whose phone is confirmed: you should see **Welcome to StorageX** and be asked to choose a PIN.
+6. When the networks approve the code, put it in **Settings → Farmer messages and USSD**, so texts (such as PIN resets) tell farmers what to dial.
+
+Due-date reminders are sent at about 10:10 each morning by the daily job that `setup.sh` installs. To send them by hand: `cd /srv/storagex && node dist/cli.mjs remind`.

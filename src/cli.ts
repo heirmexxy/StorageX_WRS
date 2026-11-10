@@ -6,6 +6,7 @@
 //   restore-check <file>         restore a backup into a throwaway database and count rows (proves backups work)
 //   verify-audit                 check the audit log hash chain
 //   revalue                      value every live receipt for today (run daily)
+//   remind                       text farmers whose loans fall due soon or were missed (run daily)
 //   purge-files                  delete ID photos whose retention date has passed (run daily)
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -14,6 +15,7 @@ import { config } from './lib/config';
 import { closePool, db, openPool } from './lib/db';
 import { purgeExpiredFiles } from './lib/files';
 import { revalueAll } from './lib/valuation';
+import { sendReminders } from './lib/notify';
 import { migrate, seed } from './lib/migrate';
 import { bootstrapSuperAdmin } from './lib/auth';
 import { verifyAuditChain } from './lib/audit';
@@ -70,6 +72,11 @@ async function main() {
       }
       break;
     }
+    case 'remind': {
+      const r = await sendReminders();
+      console.log(`reminders sent: ${r.soon} due soon, ${r.overdue} overdue`);
+      break;
+    }
     case 'revalue': {
       const r = await revalueAll();
       console.log(`${r.day}: valued ${r.valued}, without price ${r.unpriced}, price falls over the alert level ${r.drops.length}`);
@@ -87,7 +94,7 @@ async function main() {
       break;
     }
     default:
-      console.log('commands: migrate | seed | make-admin <email> <name> | backup [file] | restore-check <file> | verify-audit | purge-files | revalue');
+      console.log('commands: migrate | seed | make-admin <email> <name> | backup [file] | restore-check <file> | verify-audit | purge-files | revalue | remind');
       process.exitCode = 1;
   }
 }

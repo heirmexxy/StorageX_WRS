@@ -26,6 +26,8 @@ import * as V from '../src/lib/valuation';
 import * as F from '../src/lib/finance';
 import * as SL from '../src/lib/settlement';
 import * as Tw from '../src/lib/tower';
+import * as N from '../src/lib/notify';
+import * as U from '../src/lib/ussd';
 import { reviewLine } from '../src/lib/agents/batch-review';
 import { verify as sigVerify } from '../src/lib/sign';
 import { screenIntake } from '../src/lib/agents/intake-screen';
@@ -794,6 +796,17 @@ async function main() {
     ok(csv.includes(loanNo) && csv.includes(liveNo) && csv.includes('ACC-CIF-77001'));
     await rejects(F.ncrCsv(gateClerk));
   });
+  await t('due-date reminders go once, a set number of days before and the day after', async () => {
+    const ln = await db.get<any>(`SELECT loan_no, to_char(due_on,'YYYY-MM-DD') AS due, farmer_id FROM loans WHERE status='disbursed' ORDER BY disbursed_on, loan_no LIMIT 1`);
+    ok(ln, 'a disbursed loan to remind about');
+    const due = new Date(ln.due + 'T10:00:00+01:00');
+    const before = new Date(due.getTime() - 7 * 86_400_000), after = new Date(due.getTime() + 86_400_000);
+    eq((await N.sendReminders(before)).soon, 1);
+    eq((await N.sendReminders(before)).soon, 0, 'not twice');
+    eq((await N.sendReminders(after)).overdue, 1);
+    ok(sentForTests.at(-1)!.text.includes(ln.loan_no) && sentForTests.at(-1)!.text.includes('was due'));
+    eq((await N.sendReminders(new Date(due.getTime() - 3 * 86_400_000))).soon, 0);
+  });
   await t('control tower: the lender sees its book, the stock behind it, and what to do next', async () => {
     eq(Tw.towerOrg(officer), accionId); eq(Tw.towerOrg(admin), null);
     let refused = false; try { Tw.towerOrg(gateClerk); } catch { refused = true; } ok(refused, 'warehouse clerks have no tower');
@@ -907,6 +920,72 @@ async function main() {
     eq(st.paid, farmerLine.amount); ok(st.sales.some((x: any) => x.ref === saleRef));
     const lenderView = (await SL.saleView(officer, saleRef))!;
     ok(lenderView.settlement.lines.every((l: any) => l.org_id === accionId || l.party !== 'lender'));
+  });
+
+  console.log('\nFarmer messages and USSD');
+  const adaRow = (await db.get<any>('SELECT id, phone_e164 FROM farmers WHERE code=$1', ada))!;
+  await t('every farmer text is logged once, from approved wording', async () => {
+    const log = await N.messagesOf(adaRow.id);
+    for (const ev of ['loan_disbursed', 'loan_repayment', 'loan_closed', 'sale_paid']) ok(log.some((m) => m.event === ev && m.status === 'sent'), `${ev} missing: ${log.map((m) => m.event)}`);
+    const again = log.find((m) => m.event === 'loan_disbursed')!;
+    eq((await N.notifyFarmer(adaRow.id, 'loan_disbursed', again.ref, { lender: 'x', loan: 'x', amount: 'x', due: 'x' })).status, 'duplicate');
+    ok(N.render('Hi {name}, {gone}.', { name: 'Ada' }) === 'Hi Ada, .');
+    eq(N.smsParts('a'.repeat(160)), 1); eq(N.smsParts('a'.repeat(161)), 2); eq(N.smsParts('ọ'.repeat(71)), 2);
+  });
+  await t('translations go live only after a second Kitovu person approves them', async () => {
+    await rejects(N.proposeTemplate(officer, 'loan_disbursed', 'pcm', 'StorageX: {lender} don send {amount} for loan {loan}. Pay by {due}.'));
+    await rejects(N.proposeTemplate(ops, 'loan_disbursed', 'pcm', 'StorageX: {lender} don send {amount} for loan {loan} to {bvn}.'));
+    await rejects(N.proposeTemplate(ops, 'loan_disbursed', 'pcm', 'StorageX: {lender} don send your loan {loan}. Pay by {due}.'));
+    await rejects(N.proposeTemplate(ops, 'loan_disbursed', 'pcm', '{lender} don send {amount} for loan {loan}. Pay by {due}.'));
+    const id = await N.proposeTemplate(ops, 'loan_disbursed', 'pcm', 'StorageX: {lender} don send {amount} for your loan {loan}. Pay am back by {due}.');
+    const f = (await R.farmerByCode(ops, ada))!;
+    await N.setFarmerMessaging(ops, f.id, { language: 'pcm', reminders: '0' });
+    eq((await N.notifyFarmer(f.id, 'loan_disbursed', 'T-1', { lender: 'Accion', loan: 'L1', amount: 'N5', due: 'today' })).body!.startsWith('StorageX: Accion has sent'), true, 'English until approved');
+    await rejects(N.decideTemplate(ops, id, true));
+    await N.decideTemplate(admin, id, true);
+    ok(sentForTests.length > 0);
+    const r = await N.notifyFarmer(f.id, 'loan_disbursed', 'T-2', { lender: 'Accion', loan: 'L1', amount: 'N5', due: 'today' });
+    eq(r.body, 'StorageX: Accion don send N5 for your loan L1. Pay am back by today.');
+    eq((await N.notifyFarmer(f.id, 'loan_due_soon', 'T-3', { lender: 'Accion', loan: 'L1', due: 'today', owed: 'N5' })).status, 'skipped', 'reminders off for this farmer');
+    const table = await N.templateTable();
+    ok(table.find((e) => e.event === 'loan_disbursed')!.langs.find((l: any) => l.language === 'pcm')!.live);
+    await N.setFarmerMessaging(ops, f.id, { language: 'en', reminders: '1' });
+  });
+  await t('USSD: the farmer chooses a PIN, then sees produce, loans, sales and prices', async () => {
+    const at = (text: string, phone = adaRow.phone_e164) => U.ussd({ sessionId: 'S1', phoneNumber: phone, text });
+    { const o = await at('', '+2349011112222'); ok(o.includes('not registered'), o); }
+    { const o = await at(''); ok(o.startsWith('CON Welcome to StorageX'), o); }
+    { const o = await at('1111'); ok(o.includes('too easy'), o); }
+    { const o = await at('5831'); ok(o.startsWith('CON Enter the same PIN'), o); }
+    { const o = await at('5831*5830'); ok(o.includes('different'), o); }
+    { const o = await at('5831*5831'); ok(o.includes('PIN saved'), o); }
+    { const o = await at(''); ok(o.includes('Enter your PIN'), o); }
+    eq(await at('5831'), U.MENU);
+    const screens = [await at('5831*1'), await at('5831*2'), await at('5831*3'), await at('5831*4')];
+    for (const x of screens) ok(x.startsWith('END ') && x.length <= 182, `${x.length}: ${x}`);
+    ok(screens[2].includes('SL-') || screens[2].includes('No sales'), screens[2]);
+    { const o = await at('5831*5'); ok(o.startsWith('CON Kitovu will call you'), o); }
+    { const o = await at('5831*5*2'); ok(o.includes('within 2 working days'), o); }
+    ok((await at('5831*5*2')).includes('within 2 working days'), 'asking twice is fine');
+    eq((await U.openCallbacks()).filter((x) => x.code === ada).length, 1);
+    const logged = await db.all<any>(`SELECT * FROM ussd_log WHERE farmer_id=$1`, adaRow.id);
+    ok(logged.length >= 8 && logged.every((r) => !JSON.stringify(r).includes('5831') && !JSON.stringify(r).includes(adaRow.phone_e164.slice(4))), 'no PIN or number in the log');
+  });
+  await t('USSD: three wrong PINs lock it; Kitovu resets with a reason and the farmer is told', async () => {
+    const at = (text: string) => U.ussd({ sessionId: 'S2', phoneNumber: adaRow.phone_e164, text });
+    { const o = await at('0000'); ok(o.includes('2 tries left'), o); }
+    { const o = await at('0001'); ok(o.includes('1 try left'), o); }
+    { const o = await at('0002'); ok(o.includes('locked'), o); }
+    ok((await at('5831')).includes('Too many wrong PINs'), 'right PIN refused while locked');
+    await rejects(U.resetPin(officer, adaRow.id, 'called back on their number'));
+    await rejects(U.resetPin(ops, adaRow.id, 'ok'));
+    await U.resetPin(ops, adaRow.id, 'called back on their number');
+    ok(sentForTests.at(-1)!.text.includes('PIN was reset'));
+    { const o = await at(''); ok(o.startsWith('CON Welcome'), o); }
+    const cb = (await U.openCallbacks()).find((x) => x.code === ada)!;
+    await rejects(U.handleCallback(ops, cb.id, ''));
+    await U.handleCallback(ops, cb.id, 'Called, explained the loan balance');
+    eq((await U.openCallbacks()).filter((x) => x.code === ada).length, 0);
   });
 
   console.log('\nPartner applications');
@@ -1060,6 +1139,12 @@ async function main() {
     const lp = await req('GET', '/'); eq(lp.status, 200); ok(lp.text.includes('Lend against grain you can check') && lp.text.includes('/apply'));
     const sm = await req('GET', '/sample-receipt'); eq(sm.status, 200); ok(sm.text.includes('not a real receipt'));
     await signInAs(ops); eq((await req('GET', '/')).location, '/app'); delete jar.sx_sid;
+  });
+  await t('USSD gateway posts form fields without a session; farmer messages page is Kitovu-only', async () => {
+    const r = await fetch(`${base}/ussd/at`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ sessionId: 'H1', phoneNumber: '+2349011112222', serviceCode: '*347*1#', text: '' }) });
+    eq(r.status, 200); ok((await r.text()).startsWith('END This number is not registered'));
+    await signInAs(ops); eq((await req('GET', '/admin/messages')).status, 200); delete jar.sx_sid;
+    await signInAs(officer); eq((await req('GET', '/admin/messages')).status, 403); delete jar.sx_sid;
   });
   await t('lenders land in their control tower; the loan book downloads', async () => {
     await signInAs(officer);
