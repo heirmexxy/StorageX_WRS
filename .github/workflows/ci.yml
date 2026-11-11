@@ -28,3 +28,5 @@ jobs:
           node-version: 22
       - run: npm install --no-audit --no-fund
       - run: npm test
+      # Known high or critical vulnerabilities in what runs on the server fail the build.
+      - run: npm audit --omit=dev --audit-level=high

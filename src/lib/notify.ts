@@ -63,7 +63,9 @@ export async function notifyFarmer(farmerId: string, event: keyof typeof EVENTS 
     const w = await wording(event, f.language);
     const body = render(w.body, vars);
     let status: 'sent' | 'failed' | 'skipped' = 'sent', error: string | null = null;
-    if (!f.phone_e164) { status = 'skipped'; error = 'no phone number'; }
+    const st = await getSettings();
+    if (!st['notify.sms']) { status = 'skipped'; error = 'farmer texts switched off in Settings'; }
+    else if (!f.phone_e164) { status = 'skipped'; error = 'no phone number'; }
     else if (!f.phone_verified_at) { status = 'skipped'; error = 'phone not confirmed'; }
     else if (EVENTS[event].reminder && !f.sms_reminders) { status = 'skipped'; error = 'reminders off for this farmer'; }
     else { const r = await sendSms(f.phone_e164, body); if (!r.ok) { status = 'failed'; error = r.error ?? 'not sent'; } }

@@ -12,7 +12,7 @@ import { UserError } from './errors';
 import { toKobo, fmtNGN, bpOf } from './money';
 import { notifyFarmer as notify } from './notify';
 import { getSettings } from './settings';
-import { clean } from './util';
+import { clean, csvCell } from './util';
 import { policyFor, referencePrice, compute } from './valuation';
 import { receiptBalance } from './stock';
 
@@ -395,7 +395,7 @@ export async function ncrCsv(a: Actor) {
        JOIN warehouses w ON w.id=r.warehouse_id JOIN farmers f ON f.id=ln.farmer_id LEFT JOIN states s ON s.code=f.state_code
        LEFT JOIN lender_verifications v ON v.farmer_id=f.id AND v.org_id=ln.lender_org_id AND v.revoked_at IS NULL
      WHERE li.released_at IS NULL AND ln.lender_org_id=$1 ORDER BY ln.loan_no, r.receipt_no`, a.membership!.org_id);
-  const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const q = csvCell;
   const head = ['loan_no', 'debtor_name', 'debtor_phone', 'debtor_state', 'debtor_community', 'your_customer_ref', 'storagex_farmer_code', 'collateral_type', 'collateral_description', 'receipt_no', 'quantity_kg', 'warehouse', 'secured_amount_ngn', 'lien_date', 'disbursed_on', 'maturity_date'];
   const lines = rows.map((r) => [r.loan_no, r.full_name, r.phone_e164, r.state, r.community, r.customer_ref, r.farmer_code, 'Warehouse receipt (agricultural produce)',
     `${r.kg} kg ${r.commodity} at ${r.warehouse} (${r.wh_code})`, r.receipt_no, r.kg, r.warehouse, (r.principal / 100).toFixed(2), ymd(new Date(r.lien_date)), r.disbursed_on ? ymd(new Date(r.disbursed_on)) : '', r.due_on ? ymd(new Date(r.due_on)) : ''].map(q).join(','));

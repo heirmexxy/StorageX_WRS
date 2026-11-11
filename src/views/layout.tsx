@@ -7,28 +7,38 @@ export const render = (el: ReactNode) => '<!doctype html>' + renderToString(el a
 
 export function Csrf({ c }: { c: Ctx }) { return <input type="hidden" name="_csrf" value={c.csrf} />; }
 
-const NAV: { href: string; label: string; perm?: Permission; kitovu?: boolean }[] = [
-  { href: '/app', label: 'Home' },
-  { href: '/farmers', label: 'Farmers', perm: 'farmers.view' },
-  { href: '/kyc/review', label: 'ID checks', perm: 'kyc.review' },
-  { href: '/review', label: 'Review queue', perm: 'farmers.edit', kitovu: true },
-  { href: '/intakes?status=held', label: 'Held deliveries', perm: 'kyc.review', kitovu: true },
-  { href: '/field-partners', label: 'Field partners', perm: 'field_partners.manage' },
-  { href: '/intakes', label: 'Deliveries', perm: 'stock.manage' },
-  { href: '/receipts', label: 'Receipts', perm: 'receipts.view' },
-  { href: '/stock', label: 'Stock', perm: 'stock.manage' },
-  { href: '/prices', label: 'Prices', perm: 'finance.view' },
-  { href: '/tower', label: 'Control tower', perm: 'finance.view' },
-  { href: '/loans', label: 'Loans', perm: 'finance.view' },
-  { href: '/sales', label: 'Sales', perm: 'receipts.issue', kitovu: true },
-  { href: '/warehouses', label: 'Warehouses', perm: 'warehouses.view' },
-  { href: '/admin/applications', label: 'Applications', perm: 'orgs.manage' },
-  { href: '/admin/people', label: 'People', perm: 'users.manage' },
-  { href: '/admin/orgs', label: 'Organisations', perm: 'orgs.manage' },
-  { href: '/admin/audit', label: 'Audit log', perm: 'audit.view' },
-  { href: '/admin/messages', label: 'Farmer messages', perm: 'farmers.edit', kitovu: true },
-  { href: '/admin/settings', label: 'Settings', perm: 'settings.manage' },
-  { href: '/account', label: 'My account' },
+type NavItem = { href: string; label: string; perm?: Permission; kitovu?: boolean };
+// Grouped so the menu stays on one line; a group with one item for this person shows as a plain link.
+const NAV: { group: string; items: NavItem[] }[] = [
+  { group: 'Home', items: [{ href: '/app', label: 'Home' }] },
+  { group: 'Farmers', items: [
+    { href: '/farmers', label: 'Farmers', perm: 'farmers.view' },
+    { href: '/kyc/review', label: 'ID checks', perm: 'kyc.review' },
+    { href: '/field-partners', label: 'Field partners', perm: 'field_partners.manage' },
+    { href: '/admin/messages', label: 'Farmer messages', perm: 'farmers.edit', kitovu: true },
+  ] },
+  { group: 'Stock', items: [
+    { href: '/intakes', label: 'Deliveries', perm: 'stock.manage' },
+    { href: '/intakes?status=held', label: 'Held deliveries', perm: 'kyc.review', kitovu: true },
+    { href: '/receipts', label: 'Receipts', perm: 'receipts.view' },
+    { href: '/stock', label: 'Stock', perm: 'stock.manage' },
+    { href: '/warehouses', label: 'Warehouses', perm: 'warehouses.view' },
+  ] },
+  { group: 'Finance', items: [
+    { href: '/tower', label: 'Control tower', perm: 'finance.view' },
+    { href: '/loans', label: 'Loans', perm: 'finance.view' },
+    { href: '/prices', label: 'Prices', perm: 'finance.view' },
+    { href: '/sales', label: 'Sales', perm: 'receipts.issue', kitovu: true },
+  ] },
+  { group: 'Admin', items: [
+    { href: '/review', label: 'Review queue', perm: 'farmers.edit', kitovu: true },
+    { href: '/admin/applications', label: 'Applications', perm: 'orgs.manage' },
+    { href: '/admin/people', label: 'People', perm: 'users.manage' },
+    { href: '/admin/orgs', label: 'Organisations', perm: 'orgs.manage' },
+    { href: '/admin/audit', label: 'Audit log', perm: 'audit.view' },
+    { href: '/admin/settings', label: 'Settings', perm: 'settings.manage' },
+  ] },
+  { group: 'My account', items: [{ href: '/account', label: 'My account' }] },
 ];
 
 export function Page({ c, title, children, bare, wide }: { c: Ctx; title: string; children: ReactNode; bare?: boolean; wide?: boolean }) {
@@ -46,9 +56,18 @@ export function Page({ c, title, children, bare, wide }: { c: Ctx; title: string
           <a className="brand" href={s ? '/app' : '/'}>StorageX <span>WRS</span></a>
           {s && (
             <nav>
-              {NAV.filter((n) => (!n.perm || can(s.active, n.perm)) && (!n.kitovu || s.active?.org_kind === 'kitovu')).map((n) => (
-                <a key={n.href} href={n.href} className={c.path === n.href || (n.href !== '/app' && c.path.startsWith(n.href + '/')) ? 'on' : ''}>{n.label}</a>
-              ))}
+              {NAV.map(({ group, items }) => {
+                const mine = items.filter((n) => (!n.perm || can(s.active, n.perm)) && (!n.kitovu || s.active?.org_kind === 'kitovu'));
+                const on = (n: NavItem) => c.path === n.href.split('?')[0] || (n.href !== '/app' && c.path.startsWith(n.href.split('?')[0] + '/'));
+                if (!mine.length) return null;
+                if (mine.length === 1) return <a key={group} href={mine[0].href} className={on(mine[0]) ? 'on' : ''}>{mine[0].label}</a>;
+                return (
+                  <details key={group} className={`menu${mine.some(on) ? ' on' : ''}`}>
+                    <summary>{group}</summary>
+                    <div>{mine.map((n) => <a key={n.href} href={n.href} className={on(n) ? 'on' : ''}>{n.label}</a>)}</div>
+                  </details>
+                );
+              })}
             </nav>
           )}
           {s && (
@@ -108,3 +127,18 @@ export function Select({ label, name, value, options, required, hint, blank }: {
 }
 
 export const fmtDay = (d: Date | string | null | undefined) => (d ? new Date(d).toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+
+/** "Showing 101–200 of 4,312" with previous/next links that keep the current filters. */
+export function Pager({ c, rows, size = 100 }: { c: Ctx; rows: { total_rows?: number }[]; size?: number }) {
+  const total = rows[0]?.total_rows ?? 0;
+  if (total <= size) return null;
+  const page = Math.max(0, Math.floor(Number(c.query.page) || 0));
+  const link = (p: number) => { const u = new URLSearchParams(c.query as Record<string, string>); if (p) u.set('page', String(p)); else u.delete('page'); const qs = u.toString(); return c.path + (qs ? `?${qs}` : ''); };
+  return (
+    <nav className="pager" aria-label="Pages">
+      <span className="muted">{`Showing ${(page * size + 1).toLocaleString('en-NG')}–${Math.min(total, (page + 1) * size).toLocaleString('en-NG')} of ${total.toLocaleString('en-NG')}`}</span>
+      {page > 0 && <a className="button" href={link(page - 1)}>Previous</a>}
+      {(page + 1) * size < total && <a className="button" href={link(page + 1)}>Next</a>}
+    </nav>
+  );
+}

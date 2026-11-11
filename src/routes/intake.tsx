@@ -43,7 +43,7 @@ post('/api/intake/farmer-code/verify', 'perm:stock.manage', (c) => api(c, async 
 get('/intakes', 'auth', async (c) => {
   seeDeliveries(c);
   const q = c.query;
-  c.html(render(<IntakesPage c={c} rows={await I.listIntakes(c.actor, { status: q.status, warehouse: q.warehouse })} q={q} />));
+  c.html(render(<IntakesPage c={c} rows={await I.listIntakes(c.actor, { status: q.status, warehouse: q.warehouse, page: q.page })} q={q} />));
 });
 get('/intakes/:ref', 'auth', async (c) => {
   seeDeliveries(c);

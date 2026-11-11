@@ -37,9 +37,10 @@ async function findings(): Promise<Finding[]> {
   const fs = await db.all<any>(`SELECT id, code, full_name, phone_e164, community, state_code, created_at FROM farmers WHERE status='active' ORDER BY created_at, code`);
   const byPhone = new Map<string, any[]>(), byPlace = new Map<string, any[]>();
   const norm = (x: string) => x.toLowerCase().replace(/[^a-z ]/g, '').split(/\s+/).filter(Boolean).sort().join(' ');
+  const place = (x: string) => x.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();   // "Phase 1" is not "Phase 2"
   for (const f of fs) {
     if (f.phone_e164) byPhone.set(f.phone_e164, [...(byPhone.get(f.phone_e164) ?? []), f]);
-    if (f.community && f.state_code) { const k = `${norm(f.full_name)}|${norm(f.community)}|${f.state_code}`; byPlace.set(k, [...(byPlace.get(k) ?? []), f]); }
+    if (f.community && f.state_code) { const k = `${norm(f.full_name)}|${place(f.community)}|${f.state_code}`; byPlace.set(k, [...(byPlace.get(k) ?? []), f]); }
   }
   const dupOf = new Map<string, string>();
   for (const group of byPhone.values()) for (let k = 1; k < group.length; k++) {
@@ -97,27 +98,31 @@ export async function runSteward(startedBy = 'cron') {
     const openMap = new Map(open.map((o) => [key(o.entity, o.entity_id, o.code), o]));
     const dismissed = new Set((await db.all<any>(`SELECT entity, entity_id, code, detail FROM data_issues WHERE source='steward' AND resolved_at IS NOT NULL AND resolved_by <> $1`, ACTOR))
       .map((d) => key(d.entity, d.entity_id, d.code) + '|' + d.detail));
-    let opened = 0, closed = 0;
-    const seen = new Set<string>();
-    const byCode: Record<string, number> = {};
+    // Work out every change first, then write them in a few bulk statements (thousands of farmers in one run).
+    const seen = new Set<string>(), byCode: Record<string, number> = {};
+    const refresh: { id: string; detail: string }[] = [], create: Finding[] = [];
     for (const f of found) {
       const k = key(f.entity, f.id, f.code);
       if (seen.has(k)) continue;
       seen.add(k);
       byCode[f.code] = (byCode[f.code] ?? 0) + 1;
       const o = openMap.get(k);
-      if (o) { await db.run(`UPDATE data_issues SET last_seen_at=now(), detail=$2 WHERE id=$1`, o.id, f.detail); continue; }
+      if (o) { if (o.detail !== f.detail) refresh.push({ id: o.id, detail: f.detail }); continue; }
       if (dismissed.has(k + '|' + f.detail)) continue;      // a person already said this one is fine
-      await db.run(`INSERT INTO data_issues (entity, entity_id, severity, code, detail, source) VALUES ($1,$2,$3,$4,$5,'steward')`, f.entity, f.id, f.severity, f.code, f.detail);
-      if (f.entity === 'farmer' && f.severity !== 'info') await db.run('UPDATE farmers SET needs_review=true WHERE id=$1', f.id);
-      opened++;
+      create.push(f);
     }
-    for (const o of open) if (!seen.has(key(o.entity, o.entity_id, o.code))) {
-      await db.run(`UPDATE data_issues SET resolved_at=now(), resolved_by=$2, resolved_note='No longer found by the data steward.' WHERE id=$1`, o.id, ACTOR);
-      if (o.entity === 'farmer' && !(await db.val(`SELECT 1 FROM data_issues WHERE entity='farmer' AND entity_id=$1 AND resolved_at IS NULL AND severity<>'info'`, o.entity_id)))
-        await db.run('UPDATE farmers SET needs_review=false WHERE id=$1', o.entity_id);
-      closed++;
-    }
+    const gone = open.filter((o) => !seen.has(key(o.entity, o.entity_id, o.code)));
+    await db.run(`UPDATE data_issues SET last_seen_at=now() WHERE source='steward' AND resolved_at IS NULL`);
+    if (refresh.length) await db.run(`UPDATE data_issues d SET detail=x.detail FROM unnest($1::bigint[], $2::text[]) AS x(id, detail) WHERE d.id=x.id`, refresh.map((r) => r.id), refresh.map((r) => r.detail));
+    if (create.length) await db.run(`INSERT INTO data_issues (entity, entity_id, severity, code, detail, source)
+      SELECT e, i, s, c, d, 'steward' FROM unnest($1::text[], $2::uuid[], $3::text[], $4::text[], $5::text[]) AS x(e, i, s, c, d)`,
+      create.map((f) => f.entity), create.map((f) => f.id), create.map((f) => f.severity), create.map((f) => f.code), create.map((f) => f.detail));
+    if (gone.length) await db.run(`UPDATE data_issues SET resolved_at=now(), resolved_by=$2, resolved_note='No longer found by the data steward.' WHERE id = ANY($1::bigint[])`, gone.map((o) => o.id), ACTOR);
+    // Farmers' "needs review" mark follows their open items.
+    await db.run(`UPDATE farmers f SET needs_review=true WHERE f.id = ANY($1::uuid[]) AND NOT f.needs_review`, create.filter((f) => f.entity === 'farmer' && f.severity !== 'info').map((f) => f.id));
+    await db.run(`UPDATE farmers f SET needs_review=false WHERE f.id = ANY($1::uuid[]) AND f.needs_review
+      AND NOT EXISTS (SELECT 1 FROM data_issues d WHERE d.entity='farmer' AND d.entity_id=f.id AND d.resolved_at IS NULL AND d.severity<>'info')`, gone.filter((o) => o.entity === 'farmer').map((o) => o.entity_id));
+    const opened = create.length, closed = gone.length;
     const stillOpen = Number(await db.val(`SELECT count(*) FROM data_issues WHERE source='steward' AND resolved_at IS NULL`));
     await db.run(`UPDATE steward_runs SET finished_at=now(), opened=$2, closed=$3, still_open=$4, by_code=$5 WHERE id=$1`, run, opened, closed, stillOpen, JSON.stringify(byCode));
     await audit(systemActor('data-steward'), 'steward.run', { data: { run, opened, closed, by: startedBy } });

@@ -30,6 +30,8 @@ import * as N from '../src/lib/notify';
 import * as U from '../src/lib/ussd';
 import * as INS from '../src/lib/agents/intake-inspector';
 import * as DS from '../src/lib/agents/data-steward';
+import { csvCell } from '../src/lib/util';
+import { integrations } from '../src/lib/integrations';
 import { reviewLine } from '../src/lib/agents/batch-review';
 import { verify as sigVerify } from '../src/lib/sign';
 import { screenIntake } from '../src/lib/agents/intake-screen';
@@ -1068,6 +1070,30 @@ async function main() {
     const issues = await R.openIssues(ops, { includeInfo: true });
     ok(issues.some((x: any) => x.source === 'steward'));
     eq((await DS.lastRun())!.started_by, 'test');
+  });
+
+  console.log('\nPilot hardening');
+  await t('downloads cannot smuggle spreadsheet formulas', () => {
+    eq(csvCell('=HYPERLINK("http://x","click")'), `"'=HYPERLINK(""http://x"",""click"")"`);
+    eq(csvCell('@SUM(A1)'), `"'@SUM(A1)"`); eq(csvCell('-12.5'), '"-12.5"'); eq(csvCell('Ada Okafor'), '"Ada Okafor"');
+  });
+  await t('farmer texts can be switched off until SMS is connected', async () => {
+    await S.saveSettings(admin, { 'notify.sms': '0' });
+    const r = await N.notifyFarmer(adaRow.id, 'loan_closed', 'OFF-1', { lender: 'x', loan: 'x', amount: 'x' });
+    eq(r.status, 'skipped');
+    eq((await N.messagesOf(adaRow.id))[0].error, 'farmer texts switched off in Settings');
+    await S.saveSettings(admin, { 'notify.sms': '1' });
+    const links = integrations(await S.getSettings());
+    ok(links.find((l) => l.name === 'Web address')!.state === 'warn', 'a localhost address is flagged');
+    ok(links.find((l) => l.name === 'AI checks (Anthropic)')!.status.includes('Not connected'));
+  });
+  await t('long lists page through 100 at a time', async () => {
+    await db.run(`INSERT INTO farmers (code, full_name, state_code, registered_by_user)
+      SELECT 'SXF-9' || lpad(g::text, 5, '0'), 'Paging Farmer ' || g, 'NI', $1 FROM generate_series(1, 230) g`, ops.user.id);
+    const p0 = await R.searchFarmers(ops, { text: 'Paging Farmer' }), p2 = await R.searchFarmers(ops, { text: 'Paging Farmer', page: '2' });
+    eq(p0.length, 100); eq((p0[0] as any).total_rows, 230); eq(p2.length, 30);
+    ok(!p0.some((f) => p2.some((g) => g.code === f.code)), 'pages do not overlap');
+    eq((await R.searchFarmers(ops, { text: 'Paging Farmer', page: '-3' })).length, 100, 'a bad page number shows the first page');
   });
 
   console.log('\nPartner applications');

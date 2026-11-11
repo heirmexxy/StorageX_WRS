@@ -88,3 +88,26 @@ A USSD code takes a few weeks to get, because the networks have to approve it. S
 6. When the networks approve the code, put it in **Settings → Farmer messages and USSD**, so texts (such as PIN resets) tell farmers what to dial.
 
 Due-date reminders are sent at about 10:10 each morning by the daily job that `setup.sh` installs. To send them by hand: `cd /srv/storagex && node dist/cli.mjs remind`.
+
+## Step 13 — Copy backups to Google Drive every night (encrypted)
+The server already backs itself up at 02:15 each night, but the copies stay on the same server. These steps send an encrypted copy to Google Drive as well, so losing the server does not lose the data. You do this once; it takes about 20 minutes. Do one step at a time.
+
+1. **Pick the Google account.** Use a Kitovu Google Workspace account that more than one director can get into (not a personal Gmail). In Google Drive, create a folder called `StorageX backups`.
+2. **Install rclone on the server.** Connect with SSH and run: `sudo apt install -y rclone`
+3. **Install rclone on your own computer too.** The server has no web browser, so the one-time Google sign-in happens on your computer. Download it from rclone.org/downloads and unzip it.
+4. **Start the setup on the server**, as the StorageX user: `sudo -u storagex rclone config`
+   - Type `n` (new remote). Name: `gdrive`. Storage type: type `drive` (Google Drive).
+   - Leave client id and client secret blank (press Enter). Scope: choose `1` (full access).
+   - Leave the next questions blank until it asks **"Use auto config?"**: type `n`.
+5. **Sign in to Google on your computer.** The server shows a command starting `rclone authorize "drive"`. Run that exact command on your computer (in the folder you unzipped). A browser opens: sign in with the account from step 1 and allow access. Your computer then prints a long code. Copy all of it.
+6. **Finish the Google part on the server.** Paste the code where the server asks for `config_token`. Answer `n` to "Configure this as a Shared Drive", then `y` to keep the remote.
+7. **Add encryption on top.** Still in `rclone config`: type `n` again. Name: `storagex-offsite`. Storage type: type `crypt`.
+   - Remote to encrypt: `gdrive:StorageX backups`
+   - Filename encryption: `standard`. Directory name encryption: `true`.
+   - Password: choose `y` (type your own) and enter a long passphrase. Then set a second passphrase (the "salt") the same way.
+   - **Write both passphrases down and store them away from the server** (for example in the company password manager and a sealed envelope with a director). Without them the Google Drive copies cannot be opened, by anyone.
+   - Type `y` to keep it, then `q` to quit.
+8. **Test it now** instead of waiting for tonight: `cd /srv/storagex && sudo -u storagex node dist/cli.mjs backup && sudo -u storagex bash deploy/offsite.sh`. It should end with `off-site copy done`. In Google Drive, the `StorageX backups` folder now holds files with scrambled names: that is the encryption working.
+9. **Check from StorageX.** Open **Admin → Settings**. Under **Connections**, Backups should show a recent backup and a recent off-site copy. From now on the copy runs every night after the backup, and copies older than 30 days are removed from Drive.
+
+**Restoring from Google Drive** (if the server is lost): set up a new server with steps 1–4, install rclone and repeat steps 4–7 with the same two passphrases, then `rclone copy storagex-offsite: /srv/storagex/data/restore` and follow "Restore a backup" in docs/sops.md. You also need the copy of the settings file from step 9, because uploaded ID photos can only be opened with the same APP_SECRET.

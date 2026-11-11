@@ -10,7 +10,7 @@ import { act } from './admin';
 import { receiptBalance, releasesOf } from '../lib/stock';
 import { valuationFor } from '../lib/valuation';
 
-get('/receipts', 'perm:receipts.view', async (c) => c.html(render(<ReceiptsPage c={c} rows={await Rc.listReceipts(c.actor, { status: c.query.status, text: c.query.q })} q={c.query} />)));
+get('/receipts', 'perm:receipts.view', async (c) => c.html(render(<ReceiptsPage c={c} rows={await Rc.listReceipts(c.actor, { status: c.query.status, text: c.query.q, page: c.query.page })} q={c.query} />)));
 get('/receipts/:no', 'perm:receipts.view', async (c) => {
   const r = await Rc.receiptByNo(c.actor, c.params.no);
   if (!r) throw new HttpError(404, 'No receipt with that number, or you cannot see it.');

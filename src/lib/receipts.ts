@@ -12,6 +12,7 @@ import { notifyFarmer as notify } from './notify';
 import { getSettings } from './settings';
 import { sign, verify, keyId } from './sign';
 import { Pdf } from './pdf';
+import { pageOffset } from './registry';
 import { clean } from './util';
 
 const isKitovu = (a: Actor) => a.membership?.org_kind === 'kitovu';
@@ -46,12 +47,12 @@ function scope(a: Actor) {
   return { where: 'false AND $1::uuid IS NULL', arg: null };
 }
 
-export async function listReceipts(a: Actor, q: { status?: string; text?: string } = {}) {
+export async function listReceipts(a: Actor, q: { status?: string; text?: string; page?: string } = {}) {
   if (!can(a.membership, 'receipts.view')) throw new UserError('Your role cannot see receipts.');
   const sc = scope(a), text = clean(q.text, 60);
-  return db.all<Receipt>(`SELECT ${COLS} ${FROM} WHERE ${sc.where} AND ($2 = '' OR r.status::text = $2)
+  return db.all<Receipt>(`SELECT ${COLS}, count(*) OVER()::int AS total_rows ${FROM} WHERE ${sc.where} AND ($2 = '' OR r.status::text = $2)
       AND ($3 = '' OR r.receipt_no ILIKE '%' || $3 || '%' OR f.full_name ILIKE '%' || $3 || '%' OR f.code = upper($3))
-    ORDER BY r.issued_at DESC NULLS LAST LIMIT 300`, sc.arg, clean(q.status, 30), text);
+    ORDER BY r.issued_at DESC NULLS LAST, r.receipt_no LIMIT 100 OFFSET $4`, sc.arg, clean(q.status, 30), text, pageOffset(q.page));
 }
 
 export async function receiptByNo(a: Actor, no: string) {

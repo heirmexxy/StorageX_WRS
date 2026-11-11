@@ -1,3 +1,4 @@
+import { csvCell } from './util';
 // Lender control tower (Build 9): everything a lender needs to run its StorageX book without calling Kitovu.
 // The same views serve Kitovu across all lenders (orgId = null).
 import { db } from './db';
@@ -118,7 +119,7 @@ export async function checklist(orgId: string) {
 }
 
 // ---------- exports ----------
-const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+const q = csvCell;
 const naira = (k: number | null) => (k == null ? '' : (k / 100).toFixed(2));
 export async function loanBookCsv(a: Actor) {
   const org = towerOrg(a);

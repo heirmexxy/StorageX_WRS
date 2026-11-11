@@ -1,3 +1,4 @@
+import { gzipSync } from 'node:zlib';
 // Request context: parsing, cookies, CSRF, flash messages and responses (modelled on ComboTrader's).
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { config } from './config';
@@ -112,8 +113,15 @@ export class Ctx {
     this.res.writeHead(status, headers);
     return true;
   }
-  html(body: string, status = 200) { if (this.head(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })) this.res.end(body); }
-  json(data: unknown, status = 200) { if (this.head(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })) this.res.end(JSON.stringify(data)); }
+  /** Pages and app data are compressed when the browser accepts it: the gate app's farmer list goes to old phones
+   *  on slow networks (about 650 KB for 5,000 farmers, about 60 KB compressed). */
+  private send(status: number, type: string, body: string) {
+    const gz = body.length > 2048 && /\bgzip\b/.test(String(this.req.headers['accept-encoding'] ?? ''));
+    const out = gz ? gzipSync(body, { level: 6 }) : body;
+    if (this.head(status, { 'Content-Type': type, 'Cache-Control': 'no-store', Vary: 'Accept-Encoding', ...(gz ? { 'Content-Encoding': 'gzip' } : {}) })) this.res.end(out);
+  }
+  html(body: string, status = 200) { this.send(status, 'text/html; charset=utf-8', body); }
+  json(data: unknown, status = 200) { this.send(status, 'application/json; charset=utf-8', JSON.stringify(data)); }
   text(body: string, status = 200) { if (this.head(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })) this.res.end(body); }
   download(body: string | Buffer, type: string, filename: string) { if (this.head(200, { 'Content-Type': type, 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control': 'no-store' })) this.res.end(body); }
   redirect(to: string, status = 303) { if (this.head(status, { Location: to })) this.res.end(); }

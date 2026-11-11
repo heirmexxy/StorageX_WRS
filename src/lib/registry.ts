@@ -37,13 +37,17 @@ function farmerScope(a: Actor): { where: string; arg: string | null } {
 const FARMER_COLS = `f.id, f.code, f.full_name, f.phone_e164, f.sex, f.state_code, s.name AS state_name, f.community, f.commodities, f.kyc_level, f.status,
   f.needs_review, f.source, f.year_of_birth, f.phone_verified_at, f.phone_check_method, f.phone_attestation, f.id_type, f.id_last4, f.created_at, f.updated_at`;
 
-export async function searchFarmers(a: Actor, q: { text?: string; state?: string; level?: string; review?: string; status?: string } = {}) {
+/** Lists show 100 rows a page; the page number comes from the address. */
+export const PAGE_SIZE = 100;
+export const pageOffset = (p: unknown) => Math.min(Math.max(0, Math.floor(Number(p) || 0)), 10_000) * PAGE_SIZE;
+
+export async function searchFarmers(a: Actor, q: { text?: string; state?: string; level?: string; review?: string; status?: string; page?: string } = {}) {
   need(a, 'farmers.view');
   const sc = farmerScope(a);
   const text = clean(q.text, 80);
   const phone = normPhone(text);
   return db.all<Farmer>(
-    `SELECT ${FARMER_COLS}, (SELECT count(*)::int FROM data_issues di WHERE di.entity='farmer' AND di.entity_id=f.id AND di.resolved_at IS NULL AND di.severity<>'info') AS open_issues
+    `SELECT ${FARMER_COLS}, (SELECT count(*)::int FROM data_issues di WHERE di.entity='farmer' AND di.entity_id=f.id AND di.resolved_at IS NULL AND di.severity<>'info') AS open_issues, count(*) OVER()::int AS total_rows
      FROM farmers f LEFT JOIN states s ON s.code=f.state_code
      WHERE ${sc.where.replace(/\$1/g, '$6')}
        AND ($1 = '' OR f.full_name ILIKE '%' || $1 || '%' OR f.code = upper($1) OR f.phone_e164 = $2 OR f.community ILIKE '%' || $1 || '%')
@@ -51,9 +55,9 @@ export async function searchFarmers(a: Actor, q: { text?: string; state?: string
        AND ($4 = '' OR f.kyc_level = ($4)::smallint)
        AND ($5 = '' OR f.needs_review)
        AND f.status = $7
-     ORDER BY f.needs_review DESC, f.updated_at DESC LIMIT 200`,
+     ORDER BY f.needs_review DESC, f.updated_at DESC, f.code LIMIT 100 OFFSET $8`,
     text, phone, clean(q.state, 2).toUpperCase(), /^[012]$/.test(String(q.level)) ? String(q.level) : '', q.review === '1' ? '1' : '', sc.arg,
-    ['active', 'inactive', 'merged', 'excluded'].includes(String(q.status)) ? q.status : 'active');
+    ['active', 'inactive', 'merged', 'excluded'].includes(String(q.status)) ? q.status : 'active', pageOffset(q.page));
 }
 
 export async function farmerByCode(a: Actor, code: string) {

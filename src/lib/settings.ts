@@ -33,6 +33,8 @@ export const DEFAULTS = {
   'fees.handling_kobo_per_kg': 100,
   'fees.sale_commission_bp': 150,
   /** Due-date reminders to farmers: this many days before, on the day after it is missed. Event texts always go. */
+  /** All texts to farmers. Turn off until SMS is connected, so nothing is attempted or logged as failed. */
+  'notify.sms': true,
   'notify.reminders': true,
   'notify.due_days': 7,
   /** The intake inspector asks for a check when one farmer delivers more than this in 30 days. */
@@ -61,6 +63,7 @@ export const LABELS: Record<SettingKey, string> = {
   'fees.storage_kobo_per_kg_month': 'Storage fee (kobo per kg per month)',
   'fees.handling_kobo_per_kg': 'Handling fee (kobo per kg, in and out)',
   'fees.sale_commission_bp': 'Sale commission (basis points: 150 = 1.5%)',
+  'notify.sms': 'Send texts to farmers (deliveries, receipts, loans, releases, payments)',
   'notify.reminders': 'Text farmers before a loan is due and when it is missed',
   'notify.due_days': 'Send the due-date reminder this many days before',
   'inspector.farmer_30d_kg': 'Flag a farmer who delivers more than this in 30 days (kg)',

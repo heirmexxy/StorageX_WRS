@@ -16,7 +16,7 @@ Each build ends with a check that proves it works. Gates are joint reviews with 
 | 9 | Lender control tower: book with value and loan-to-value, needs-attention list, work queue, collateral sites, concentration, dry-run checklist, loan book download | The lender runs a dry run alone | Done (Nov 2026) |
 | 10 | Farmer texts and USSD: every text from approved wording in the farmer's language and logged once; due and overdue reminders; USSD menu (PIN, produce, loans, sales, prices, call me back); PIN reset; call-back queue | Farmers know what is happening without calling | Done (Nov 2026) |
 | 11 | Agents: intake inspector (checks each delivery against history; serious findings hold it until compliance clears it), data steward (daily registry sweep that opens and closes its own review items) | Suspicious intakes are held before issue | Done (Nov 2026) |
-| 12 | Pilot hardening: security review, DPIA, off-site backups, UAT, SOPs | **Gate: pilot launch** | Next |
+| 12 | Pilot hardening: security review and fixes (docs/security.md), DPIA (docs/dpia.md), encrypted off-site backups to Google Drive, acceptance tests (docs/uat.md), procedures (docs/sops.md), scale check at 5,000 farmers, connections panel, grouped menu | **Gate: pilot launch** — UAT signed off with Accion, DPIA actions done | Built (Nov 2026); gate open |
 | 13–16 | WareGuard link, collateral watch, farmer assistant, lender and compliance agents | Gate: pilot review | |
 | 17–21 | Partner warehouses, distribution API, ComboTrader pilot, buyer desk, second lender | Gate: second lender live | |
 | 22–25 | Self-service onboarding, billing, Tier C/D, credit history, insurer portal, TradeChainX, public site | **Gate: public launch** | |

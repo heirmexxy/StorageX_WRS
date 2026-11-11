@@ -329,7 +329,7 @@ APC
 esac
 
 say "9/9 Backups and the deploy key for GitHub"
-CRON1="15 2 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs backup >> data/backups/backup.log 2>&1 && find data/backups -name '*.dump' -mtime +30 -delete"
+CRON1="15 2 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs backup >> data/backups/backup.log 2>&1 && find data/backups \\( -name '*.dump' -o -name '*.uploads.tar' \\) -mtime +30 -delete && bash deploy/offsite.sh >> data/backups/offsite.log 2>&1"
 CRON4="15 5 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs revalue >> data/backups/revalue.log 2>&1"
 # Mid-morning, so reminders do not arrive before dawn (09:10 UTC is 10:10 in Lagos).
 CRON5="10 9 * * * cd $APP_DIR && $NODE_BIN/node dist/cli.mjs remind >> data/backups/remind.log 2>&1"

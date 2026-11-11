@@ -19,6 +19,7 @@ import * as S from '../lib/settings';
 import * as N from '../lib/notify';
 import * as U from '../lib/ussd';
 import * as DS from '../lib/agents/data-steward';
+import { integrations } from '../lib/integrations';
 import { config } from '../lib/config';
 import { SettingsPage } from '../views/settings';
 
@@ -27,7 +28,7 @@ const farmerBody = (c: Ctx) => ({ ...c.body, commodities: c.multi.commodities ??
 // ---------- farmers ----------
 get('/farmers', 'perm:farmers.view', async (c) => {
   const q = c.query;
-  const rows = await R.searchFarmers(c.actor, { text: q.q, state: q.state, level: q.level, review: q.review });
+  const rows = await R.searchFarmers(c.actor, { text: q.q, state: q.state, level: q.level, review: q.review, page: q.page });
   c.html(render(<FarmersPage c={c} rows={rows} q={q} states={await R.states()} />));
 });
 
@@ -163,7 +164,7 @@ post('/admin/applications/:id/reject', 'perm:orgs.manage', (c) => act(c, '/admin
 get('/admin/settings', 'perm:settings.manage', async (c) => {
   const stats = await db.get(`SELECT count(*) FILTER (WHERE reviewer_agreed_with_ai) AS agreed, count(*) FILTER (WHERE reviewer_agreed_with_ai = false) AS disagreed,
     count(*) FILTER (WHERE ai_flag IS NOT NULL AND status IN ('approved','rejected')) AS screened FROM kyc_submissions`);
-  c.html(render(<SettingsPage c={c} s={await S.getSettings()} serverAiOff={config.kycAiMode === 'off'} hasKey={!!config.anthropicKey} stats={stats} />));
+  c.html(render(<SettingsPage c={c} s={await S.getSettings()} serverAiOff={config.kycAiMode === 'off'} hasKey={!!config.anthropicKey} stats={stats} links={integrations(await S.getSettings())} />));
 });
 post('/admin/settings', 'perm:settings.manage', (c) => act(c, '/admin/settings', async () => {
   const input: Record<string, unknown> = {};

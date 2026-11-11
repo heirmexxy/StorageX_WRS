@@ -1,8 +1,9 @@
 import type { Ctx } from '../lib/http';
+import type { Integration } from '../lib/integrations';
 import { LABELS, type Settings } from '../lib/settings';
 import { Page, Csrf } from './layout';
 
-export function SettingsPage({ c, s, serverAiOff, hasKey, stats }: { c: Ctx; s: Settings; serverAiOff: boolean; hasKey: boolean; stats: any }) {
+export function SettingsPage({ c, s, serverAiOff, hasKey, stats, links }: { c: Ctx; s: Settings; serverAiOff: boolean; hasKey: boolean; stats: any; links?: Integration[] }) {
   const box = (k: keyof Settings) => (
     <label className="check" key={k}><input type="hidden" name={k} value="0" /><input type="checkbox" name={k} value="1" defaultChecked={!!s[k]} /> {LABELS[k]}</label>
   );
@@ -10,6 +11,18 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats }: { c: Ctx; s: 
   return (
     <Page c={c} title="Settings">
       <h1>Platform settings</h1>
+      {links && (
+        <section className="card">
+          <h2>Connections</h2>
+          <p className="muted">What is connected now. Keys are set on the server (HOSTINGER.md); anything not connected is skipped safely.</p>
+          <table className="links">
+            <tbody>{links.map((l) => (
+              <tr key={l.name}><td><span className={`dot ${l.state}`} aria-hidden="true" /> <b>{l.name}</b><br /><small className="muted">{l.affects}</small></td>
+                <td>{l.status}{l.todo && <><br /><small className="bad">{l.todo}</small></>}</td></tr>
+            ))}</tbody>
+          </table>
+        </section>
+      )}
       <p className="muted">Changes apply at once and are recorded in the audit log.</p>
       <form method="post" action="/admin/settings">
         <Csrf c={c} />
@@ -58,6 +71,7 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats }: { c: Ctx; s: 
         <section className="card">
           <h2>Farmer messages and USSD</h2>
           <p className="muted">Texts about deliveries, receipts, loans, releases and payments always go: they are how a farmer spots a mistake or fraud. Reminders can be switched off here or for one farmer. Wording and translations are under <a href="/admin/messages">Farmer messages</a>.</p>
+          {box('notify.sms')}
           {box('notify.reminders')}
           <label className="field"><span>{LABELS['notify.due_days']}</span><input name="notify.due_days" type="number" min="1" max="30" defaultValue={String(s['notify.due_days'])} /></label>
           {box('ussd.enabled')}

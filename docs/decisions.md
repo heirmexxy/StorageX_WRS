@@ -2,6 +2,17 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-11 (Build 12)
+
+1. **Pilot size: 2–3 warehouses, 1,000–5,000 farmers.** Checked with 5,000 farmers and 10,000 deliveries: every page opens in under 0.3 s, and the daily data steward takes about half a second after moving to bulk writes (it took over two minutes before). Long lists now page through 100 at a time.
+2. **Off-site backups go to Google Drive**, encrypted by rclone on the server with two passphrases Kitovu keeps outside the server, so Google cannot read them. 30 days are kept in each place. Settings shows when the last backup and the last off-site copy happened.
+3. **Connections panel in Settings:** web address, SMS, AI, USSD, identity provider and backups, each with what it affects and what to do until it is connected. Farmer texts can be switched off until SMS is connected, so nothing is attempted or logged as failed.
+4. **Data protection:** Emeka is the data protection contact until a DPO is appointed. Kitovu is not yet registered with the NDPC; registration, DPO appointment, processor agreements and a cross-border basis for AI are pre-launch actions in docs/dpia.md.
+5. **Security:** code review by Claude now (findings and fixes in docs/security.md), with an independent penetration test before scaling beyond the pilot; the brief is written. CI now fails on high or critical advisories in runtime dependencies.
+6. **Acceptance tests are signed off by role** (Kitovu operations, compliance and finance leads; Accion credit approver; go-live by the Kitovu CEO and the Accion pilot sponsor). Names are added when the testers are chosen.
+7. **The menu is grouped** (Farmers, Stock, Finance, Admin) so it fits on one line; a group with one page for a person shows as a plain link.
+8. **Pages and app data are compressed**, so the gate app's farmer list for 5,000 farmers is about 60 KB instead of 650 KB on a slow network.
+
 ## 2026-11-11 (Build 11)
 
 1. **The intake inspector compares each delivery with everything before it.** Checks: a photo already used on another delivery; the same farmer at another warehouse within 6 hours; more stock than the warehouse holds; six or more records from one clerk within 15 minutes; scale readings identical to another farmer's delivery; the same moisture typed ten times running; far more than the farmer usually brings, or over 30 tonnes in 30 days (Settings); night-time capture; all-round readings. Each finding is explained in plain words. Rules are in code, so every hold can be explained to a farmer, a clerk or an auditor; the AI's part stays the display reading from Build 3.

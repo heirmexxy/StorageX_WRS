@@ -67,3 +67,10 @@ Deploying: [`deploy/HOSTINGER.md`](deploy/HOSTINGER.md).
 - Money is integer kobo; weights are kilograms. See the data standard.
 - Every change to records goes through a function that writes the audit log in the same transaction.
 - Migrations only move forward and must keep working with the previous release.
+
+## Pilot documents
+- `docs/dpia.md`: data protection impact assessment and pre-launch actions
+- `docs/uat.md`: acceptance test scripts and sign-off
+- `docs/sops.md`: operating procedures
+- `docs/security.md`: security review findings and the brief for an outside test
+- `deploy/HOSTINGER.md`: server setup, step by step (step 13: off-site backups)

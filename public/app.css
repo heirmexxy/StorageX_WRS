@@ -158,3 +158,16 @@ img.mini { width: 90px; height: 64px; object-fit: cover; border-radius: 6px; bor
 .tmpl-lang h4 { margin: 6px 0 2px; font-size: 14px; }
 .tmpl-lang textarea { width: 100%; max-width: 640px; }
 @media (max-width: 800px) { .callback { grid-template-columns: 1fr; } }
+.pager { display: flex; gap: 12px; align-items: center; justify-content: flex-end; margin-top: 12px; }
+.links td { vertical-align: top; padding: 10px 8px; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.dot.ok { background: var(--ok); } .dot.warn { background: #c27a00; } .dot.off { background: #b9bfb9; }
+header.top nav details.menu { position: relative; }
+header.top nav details.menu summary { cursor: pointer; list-style: none; padding: 6px 2px; color: inherit; }
+header.top nav details.menu summary::-webkit-details-marker { display: none; }
+header.top nav details.menu summary::after { content: ' ▾'; font-size: 11px; }
+header.top nav details.menu.on > summary { font-weight: 600; box-shadow: inset 0 -2px 0 var(--brand); }
+header.top nav details.menu > div { position: absolute; top: 100%; left: -8px; z-index: 20; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 0; min-width: 190px; box-shadow: 0 6px 18px rgba(20,40,20,.12); }
+header.top nav details.menu > div a { display: block; padding: 8px 14px; }
+header.top nav details.menu summary { color: var(--muted); }
+header.top nav details.menu.on > summary, header.top nav details.menu[open] > summary { color: var(--ink); }

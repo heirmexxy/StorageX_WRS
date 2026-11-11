@@ -1,7 +1,7 @@
 import type { Ctx } from '../lib/http';
 import { can } from '../lib/rbac';
 import type { Flag } from '../lib/intake';
-import { Page, Csrf, fmtDate } from './layout';
+import { Page, Csrf, fmtDate, Pager } from './layout';
 
 const kg = (n: number) => `${Number(n).toLocaleString('en-NG', { maximumFractionDigits: 2 })} kg`;
 const STATUS: Record<string, string> = { submitted: 'warn', held: 'warn', accepted: 'ok', rejected: '' };
@@ -39,6 +39,7 @@ export function IntakesPage({ c, rows, q }: { c: Ctx; rows: any[]; q: Record<str
             );
           })}</tbody>
         </table>
+      <Pager c={c} rows={rows as any} />
         {!rows.length && <p className="muted">No deliveries yet.</p>}
       </section>
     </Page>

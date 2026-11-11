@@ -3,7 +3,7 @@ import type { Receipt } from '../lib/receipts';
 import { EVENT_LABEL } from '../lib/receipts';
 import { can } from '../lib/rbac';
 import { qrSvg } from '../lib/qr';
-import { Page, Csrf, fmtDate, fmtDay } from './layout';
+import { Page, Csrf, fmtDate, fmtDay, Pager } from './layout';
 import { ValuePanel } from './valuation';
 
 const kg = (n: number | string) => `${Number(n).toLocaleString('en-NG', { maximumFractionDigits: 2 })} kg`;
@@ -33,6 +33,7 @@ export function ReceiptsPage({ c, rows, q }: { c: Ctx; rows: Receipt[]; q: Recor
             </tr>
           ))}</tbody>
         </table>
+      <Pager c={c} rows={rows as any} />
         {!rows.length && <p className="muted">No receipts yet. They are issued from accepted deliveries.</p>}
       </section>
     </Page>

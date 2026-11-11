@@ -11,6 +11,7 @@ import { saveFile, sniff } from './files';
 import { issueOtp, checkOtp } from './otp';
 import { notifyFarmer as notify } from './notify';
 import { inspect } from './agents/intake-inspector';
+import { pageOffset } from './registry';
 import { getSettings } from './settings';
 import { hmac, clean } from './util';
 import { placeIntake } from './stock';
@@ -223,16 +224,16 @@ export async function notifyFarmer(r: { farmer: { id: string }; ref: string; net
 }
 
 // ---------- review ----------
-export async function listIntakes(a: Actor, q: { status?: string; warehouse?: string } = {}) {
+export async function listIntakes(a: Actor, q: { status?: string; warehouse?: string; page?: string } = {}) {
   if (!can(a.membership, 'stock.manage') && !can(a.membership, 'warehouses.view')) throw new UserError('Not allowed.');
   const scope = isKitovu(a) ? null : a.membership!.org_id;
   return db.all(
     `SELECT i.id, i.ref, i.status, i.net_kg::float, i.bags, i.moisture_pct::float, i.captured_at, i.received_at, i.flags, i.farmer_confirmation,
-            f.code AS farmer_code, f.full_name AS farmer_name, f.kyc_level, w.code AS wh_code, w.name AS wh_name, c.name AS commodity, u.full_name AS clerk
+            f.code AS farmer_code, f.full_name AS farmer_name, f.kyc_level, w.code AS wh_code, w.name AS wh_name, c.name AS commodity, u.full_name AS clerk, count(*) OVER()::int AS total_rows
      FROM intakes i JOIN farmers f ON f.id=i.farmer_id JOIN warehouses w ON w.id=i.warehouse_id JOIN commodities c ON c.code=i.commodity_code JOIN users u ON u.id=i.clerk_user_id
      WHERE ($1::uuid IS NULL OR w.operator_org_id=$1) AND ($2 = '' OR i.status=$2) AND ($3 = '' OR w.code=$3)
-     ORDER BY (i.status IN ('submitted','held')) DESC, i.received_at DESC LIMIT 300`,
-    scope, ['submitted', 'accepted', 'held', 'rejected'].includes(String(q.status)) ? q.status : '', clean(q.warehouse, 20));
+     ORDER BY (i.status IN ('submitted','held')) DESC, i.received_at DESC, i.ref LIMIT 100 OFFSET $4`,
+    scope, ['submitted', 'accepted', 'held', 'rejected'].includes(String(q.status)) ? q.status : '', clean(q.warehouse, 20), pageOffset(q.page));
 }
 
 export async function intakeByRef(a: Actor, ref: string) {

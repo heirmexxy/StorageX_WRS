@@ -8,6 +8,7 @@ import { actorOf, type Actor } from './auth';
 import { can } from './rbac';
 import { UserError } from './errors';
 import { hashPassword, verifyPassword, hmac, normPhone } from './util';
+import { rateLimit } from './auth';
 import { getSettings } from './settings';
 import { fmtNGN } from './money';
 import { position, entriesOf } from './finance';
@@ -92,6 +93,8 @@ export async function ussd(i: { sessionId?: string; phoneNumber?: string; text?:
   const s = await getSettings();
   if (!s['ussd.enabled']) return 'END StorageX is not available on USSD right now. Please call Kitovu.';
   if (!phone) return 'END We could not read your number.';
+  // Each screen is one request; 40 in 10 minutes is far more than a person pressing keys.
+  if (!(await rateLimit(`ussd:${hmac(phone)}`, 40, 600))) return 'END Too many requests. Please wait a few minutes and dial again.';
   const fs = await db.all<any>(`SELECT id, code, full_name, state_code, commodities, ussd_pin_hash, ussd_failed, ussd_locked_until FROM farmers
     WHERE phone_e164=$1 AND phone_verified_at IS NOT NULL AND status='active' ORDER BY created_at`, phone);
   if (!fs.length) { await log('unknown', null); return 'END This number is not registered with StorageX. Ask your Kitovu field partner to add you.'; }

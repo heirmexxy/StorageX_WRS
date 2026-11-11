@@ -79,3 +79,11 @@ export function normPhone(raw: unknown): string | null {
   return null;
 }
 export const clean = (v: unknown, max = 200) => String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, max);
+
+/** One CSV cell, quoted. Text starting with = + - @ (or a tab/return) is prefixed with ' so spreadsheet programs
+ *  show it instead of running it as a formula (a farmer name typed as "=HYPERLINK(...)" must stay text). */
+export function csvCell(v: unknown) {
+  let t = String(v ?? '');
+  if (/^[=+\-@\t\r]/.test(t) && !/^-?\d+(\.\d+)?$/.test(t)) t = "'" + t;
+  return `"${t.replace(/"/g, '""')}"`;
+}

@@ -3,7 +3,7 @@ import { can } from '../lib/rbac';
 import type { Farmer, Issue, FieldPartner, Warehouse } from '../lib/registry';
 import { mask } from '../lib/registry';
 import { ID_TYPES, REJECT_REASONS, CONSENT_TEXT, type Submission } from '../lib/kyc';
-import { Page, Csrf, Field, Select, fmtDate, fmtDay } from './layout';
+import { Page, Csrf, Field, Select, fmtDate, fmtDay, Pager } from './layout';
 import { EXPLAIN } from '../lib/agents/data-steward';
 
 type Opt = { code: string; name: string };
@@ -28,7 +28,7 @@ export function FarmersPage({ c, rows, q, states }: { c: Ctx; rows: Farmer[]; q:
         <button>Search</button>
       </form>
       <section className="card">
-        <p className="muted">{rows.length === 200 ? 'First 200 results. Narrow the search.' : `${rows.length} farmer${rows.length === 1 ? '' : 's'}`}</p>
+        <p className="muted">{`${(rows[0] as any)?.total_rows ?? 0} farmer${(rows[0] as any)?.total_rows === 1 ? '' : 's'}`}</p>
         <table>
           <thead><tr><th>Code</th><th>Name</th><th>Phone</th><th>Place</th><th>Crops</th><th>Identity</th></tr></thead>
           <tbody>
@@ -44,6 +44,7 @@ export function FarmersPage({ c, rows, q, states }: { c: Ctx; rows: Farmer[]; q:
             ))}
           </tbody>
         </table>
+        <Pager c={c} rows={rows as any} />
       </section>
     </Page>
   );
