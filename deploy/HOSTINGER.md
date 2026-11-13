@@ -5,16 +5,23 @@ The setup script is the ComboTrader one, adapted: it is safe on a server that al
 ## Step 1 — Snapshot the server
 hPanel → **VPS → Snapshots & backups → Create snapshot**. You can restore the whole server to this moment if anything goes wrong.
 
-## Step 2 — Add the DNS record
-hPanel → **Domains → kitovu.com.ng → DNS records → Add record**: type **A**, name **wrs-beta**, points to your VPS IP. (Use another name if you prefer; pass it as `HOST=` below.)
+## Step 2 — Point storagex.com.ng at the server
+StorageX lives at **https://storagex.com.ng**. Receipt QR codes carry this address, so it must not change once real receipts are printed. `www.storagex.com.ng` redirects to it.
+1. Find your VPS IP: hPanel → **VPS → Overview** (the IPv4 address).
+2. Open the DNS settings where storagex.com.ng is managed. If you bought it through Hostinger, that is hPanel → **Domains → storagex.com.ng → DNS / Nameservers**; otherwise use your registrar's DNS page.
+3. Add (or edit) an **A** record: name **@**, points to your VPS IP. Remove any other A record for **@** (for example a parking page).
+4. Add an **A** record: name **www**, points to the same IP.
+5. Wait 10–60 minutes, then check: `ping storagex.com.ng` on your computer should show your VPS IP.
+
+To try things out first on a test address, add a record named **beta** instead and use `HOST=beta.storagex.com.ng` in steps 3 and 4, then run step 4 again with the real address before the pilot.
 
 ## Step 3 — Look before changing anything
 1. Connect: `ssh root@YOUR_VPS_IP` (or hPanel's **Browser terminal**).
 2. The repository is private, so copy the script by hand: open `deploy/setup.sh` on GitHub → **Raw**, copy everything, then on the server run `nano setup.sh`, paste, and save (Ctrl+O, Enter, Ctrl+X).
-3. Run `HOST=wrs-beta.kitovu.com.ng bash setup.sh --check` and read the report. Nothing is changed. Send it to me if anything looks surprising.
+3. Run `HOST=storagex.com.ng bash setup.sh --check` and read the report. Nothing is changed. Send it to me if anything looks surprising.
 
 ## Step 4 — Install
-1. Run `HOST=wrs-beta.kitovu.com.ng bash setup.sh` and type `YES`.
+1. Run `HOST=storagex.com.ng bash setup.sh` and type `YES`.
 2. When it pauses with a key starting `ssh-ed25519`: GitHub → **heirmexxy/StorageX_WRS → Settings → Deploy keys → Add deploy key**, title "Hostinger VPS", write access **off**. Paste, save, then press Enter on the server.
 3. It installs PostgreSQL if the server does not have it, creates the `storagex` database, builds the app, runs the migrations, starts the service, configures your web server and schedules backups.
 

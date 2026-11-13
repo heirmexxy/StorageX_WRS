@@ -6,7 +6,8 @@
 #   bash setup.sh --https     turn on HTTPS once DNS points at this server (nginx / Apache only; Caddy does it by itself)
 #
 # Options (put them before "bash"):
-#   HOST=wrs-beta.kitovu.com.ng   the address to serve (default wrs.kitovu.com.ng; a www address also redirects the bare domain)
+#   HOST=storagex.com.ng   the address to serve (default storagex.com.ng). The other form redirects to it:
+#                          www.storagex.com.ng → storagex.com.ng, or the bare domain → www if HOST starts with www.
 #   PORT=3200                      the internal port (default: the first free port from 3200)
 #   LE_EMAIL=you@example.com       email for HTTPS certificate notices
 #
@@ -14,8 +15,11 @@
 # replace the system Node.js, restart (only reloads) your web server, or edit another site's configuration.
 set -euo pipefail
 
-HOST="${HOST:-wrs.kitovu.com.ng}"
-APEX=""; [[ "$HOST" == www.* ]] && APEX="${HOST#www.}"
+HOST="${HOST:-storagex.com.ng}"
+# APEX is the other name that redirects to HOST: the bare domain for a www HOST, or www.HOST for a bare domain
+# (a name with at most three labels, e.g. storagex.com.ng). It gets a certificate only if its DNS points here.
+APEX=""
+if [[ "$HOST" == www.* ]]; then APEX="${HOST#www.}"; elif [ "$(tr -cd . <<<"$HOST" | wc -c)" -le 2 ]; then APEX="www.$HOST"; fi
 REPO="${REPO:-git@github.com:heirmexxy/StorageX_WRS.git}"
 LE_EMAIL="${LE_EMAIL:-info@kitovu.com.ng}"
 APP_DIR=/srv/storagex
@@ -149,7 +153,7 @@ if [ "$MODE" = "--check" ]; then report; echo; echo "Nothing was changed. To ins
 if [ "$MODE" = "--https" ]; then https_step; exit 0; fi
 
 report
-[ -n "$CONFLICT" ] && die "Another site on this server already uses $HOST. Use a different HOST (e.g. HOST=wrs-beta.kitovu.com.ng) or remove the old site first."
+[ -n "$CONFLICT" ] && die "Another site on this server already uses $HOST. Use a different HOST (e.g. HOST=beta.storagex.com.ng) or remove the old site first."
 echo
 read -r -p "Type YES to continue: " ok
 [ "$ok" = "YES" ] || die "Nothing changed."
@@ -351,7 +355,7 @@ StorageX is installed and running on $BIND:$PORT. Your other platforms were not 
 
 Next:
   • First administrator:  sudo -u $APP_USER bash -c 'cd $APP_DIR && $NODE_BIN/node dist/cli.mjs make-admin you@kitovu.com.ng Your Name'
-  • DNS (hPanel → Domains → kitovu.com.ng → DNS records): an A record for "${HOST%%.kitovu.com.ng}" → $PUBIP${APEX:+, and "@" → $PUBIP when you move the main site}.
+  • DNS (where the domain is managed): an A record for $HOST → $PUBIP${APEX:+, and one for $APEX → $PUBIP}.
 DONE
 if [ -n "$PROXY_NOTE" ]; then cat <<PX
   • Reverse proxy (your ${PANEL:-proxy} owns ports 80/443, so add it there):

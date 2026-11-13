@@ -2,6 +2,10 @@
 
 Newest first. Each entry: the decision, then why.
 
+## 2026-11-13 (Domain)
+
+**StorageX lives at https://storagex.com.ng**, the bare domain, because it is the shortest address to print in receipt QR codes; www.storagex.com.ng redirects to it. Once real receipts are printed, this address must not change. The setup script now treats the bare domain as the main address and www as the redirect (it still supports the reverse).
+
 ## 2026-11-11 (Build 12)
 
 1. **Pilot size: 2–3 warehouses, 1,000–5,000 farmers.** Checked with 5,000 farmers and 10,000 deliveries: every page opens in under 0.3 s, and the daily data steward takes about half a second after moving to bulk writes (it took over two minutes before). Long lists now page through 100 at a time.
