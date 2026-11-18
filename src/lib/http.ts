@@ -1,4 +1,6 @@
 import { gzipSync } from 'node:zlib';
+
+const LOCAL_PROXY = /^(::ffff:)?(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|^::1$/;
 // Request context: parsing, cookies, CSRF, flash messages and responses (modelled on ComboTrader's).
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { config } from './config';
@@ -33,10 +35,12 @@ export class Ctx {
     this.url = new URL(req.url || '/', config.baseUrl);
     this.method = (req.method || 'GET').toUpperCase();
     this.cookies = parseCookies(req.headers.cookie || '');
-    // Behind the local reverse proxy only: trust X-Forwarded-For from loopback.
+    // Trust X-Forwarded-For only from a local reverse proxy: loopback, or a private address such as a Docker
+    // network (Dokploy's Traefik reaches StorageX from its own network, e.g. 10.0.x.x or 172.18.x.x). StorageX
+    // listens only on loopback or the Docker bridge, so nothing on the internet connects to it directly.
     const peer = req.socket.remoteAddress || '';
     const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-    this.ip = (fwd && /^(127\.|::1|::ffff:127\.|172\.17\.)/.test(peer)) ? fwd : peer;
+    this.ip = (fwd && LOCAL_PROXY.test(peer)) ? fwd : peer;
     this.sessionToken = this.cookies.sx_sid || '';
     this.csrf = /^[\w-]{20,}$/.test(this.cookies.sx_csrf || '') ? this.cookies.sx_csrf : '';
     if (!this.csrf) { this.csrf = randomToken(24); this.setCookie('sx_csrf', this.csrf, { maxAge: 60 * 60 * 24 }); }
