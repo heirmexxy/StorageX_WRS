@@ -31,6 +31,8 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 say()  { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m!! %s\033[0m\n' "$*"; }
 die()  { printf '\n\033[1;31mSTOPPED: %s\033[0m\n' "$*"; exit 1; }
+# Never stop silently: say which line and command failed.
+trap 'printf "\n\033[1;31mSTOPPED at line %s while running: %s\033[0m\nSend this screen to whoever is helping you. Nothing after this point was done.\n" "$LINENO" "$BASH_COMMAND"' ERR
 [ "$(id -u)" = 0 ] || die "Run this as root (sudo -i first)."
 
 # ---------------------------------------------------------------- look around (read-only)
@@ -160,7 +162,12 @@ read -r -p "Type YES to continue: " ok
 
 # ---------------------------------------------------------------- install
 say "1/9 Tools (only what is missing; nothing is upgraded)"
-apt-get update -y >/dev/null
+# Refresh the package list quietly. Warnings (such as duplicate source lines) and an unreachable third-party source
+# do not stop the install; anything it really needs and cannot get will stop at the install line below instead.
+if ! apt-get update -y >/tmp/storagex-apt-update.log 2>&1; then
+  warn "The package list refresh reported errors (details: /tmp/storagex-apt-update.log). Continuing with what is available."
+  grep -E '^(E|Err):' /tmp/storagex-apt-update.log | head -5 || true
+fi
 need=(); for c in git curl xz openssl; do command -v "$c" >/dev/null || need+=("$c"); done
 [ ${#need[@]} -gt 0 ] && apt-get install -y --no-upgrade "${need[@]/xz/xz-utils}"
 
@@ -311,7 +318,7 @@ APC
       apt-get install -y --no-upgrade debian-keyring debian-archive-keyring apt-transport-https gnupg >/dev/null
       curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
       curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
-      apt-get update -y >/dev/null && apt-get install -y caddy
+      { apt-get update -y >/dev/null 2>&1 || true; } && apt-get install -y caddy
       # A fresh Caddy ships a demo site on :80; replace only that default file.
       grep -q '^:80' /etc/caddy/Caddyfile && : > /etc/caddy/Caddyfile
     fi
