@@ -1,4 +1,5 @@
 import type { Ctx } from '../lib/http';
+import { asset } from '../lib/assets';
 import { PARTNER_TYPES, PARTNER_GROUPS } from '../lib/applications';
 import { showcaseDoc } from '../lib/showcase';
 import { config } from '../lib/config';
@@ -19,17 +20,17 @@ export function LandingPage({ c }: { c: Ctx }) {
         <meta name="description" content="StorageX turns commodities held in certified Nigerian warehouses into receipts lenders can track at any time: the stock, its value, and whether anyone else has a claim on it." />
         <meta property="og:title" content="StorageX by Kitovu · Lend against a commodity you can track" />
         <meta property="og:description" content="Warehouse receipts for commodities in certified Nigerian warehouses, tracked from intake to sale." />
-        <meta property="og:image" content={`${site}/og.png`} />
+        <meta property="og:image" content={`${site}${asset('/og.png')}`} />
         <meta property="og:url" content={site} />
         <meta name="twitter:card" content="summary_large_image" />
-        <link rel="stylesheet" href="/landing.css" />
-        <link rel="stylesheet" href="/receipt.css" />
+        <link rel="stylesheet" href={asset('/landing.css')} />
+        <link rel="stylesheet" href={asset('/receipt.css')} />
         <Icons />
       </head>
       <body className="lp">
         <a className="skip" href="#main">Skip to content</a>
         <header className="lp-top">
-          <a className="lp-brand" href="/"><img src="/brand/storagex-logo.svg" alt="StorageX by Kitovu" width="190" height="51" /></a>
+          <a className="lp-brand" href="/"><img src={asset('/brand/storagex-logo.svg')} alt="StorageX by Kitovu" width="190" height="51" /></a>
           <nav aria-label="Main">
             <a href="#watch">How it works</a>
             <a href="#partners">Partners</a>
@@ -57,11 +58,11 @@ export function LandingPage({ c }: { c: Ctx }) {
           <section className="watch" id="watch">
             <div className="watch-copy">
               <h2>From the farm gate to payment.</h2>
-              <p>A farmer brings in a harvest. It is weighed, tested and graded, valued, and turned into a receipt. It is stored in a WareGuard-monitored warehouse, lent against, sold when the price is right, and the lender and the farmer are paid. Under two minutes, start to finish.</p>
+              <p>A farmer brings in a harvest. It is weighed, tested and graded, valued, and turned into a receipt. It is stored in a WareGuard-monitored warehouse, lent against, sold when the price is right, and the lender and the farmer are paid.</p>
             </div>
-            <video className="watch-video" controls preload="none" playsInline poster="/media/storagex-how-it-works.jpg" width="1280" height="720">
-              <source src="/media/storagex-how-it-works.mp4" type="video/mp4" />
-              <a href="/media/storagex-how-it-works.mp4">Download the walkthrough video</a>
+            <video className="watch-video" autoPlay muted loop playsInline preload="auto" poster={asset('/media/storagex-how-it-works.jpg')} width="1280" height="720" aria-label="How StorageX works, from the farm gate to payment">
+              <source src={asset('/media/storagex-how-it-works.mp4')} type="video/mp4" />
+              <a href={asset('/media/storagex-how-it-works.mp4')}>Download the walkthrough video</a>
             </video>
           </section>
 
@@ -114,11 +115,11 @@ export function LandingPage({ c }: { c: Ctx }) {
 
           <section className="partners" id="partners">
             <h2>Every partner has a part.</h2>
-            <p className="partners-lead">A receipt system works only when many hands do their part well. Open your group to see what you bring, what you get, and how to start.</p>
+            <p className="partners-lead">A receipt system works only when many hands do their part well. Choose the group your organisation belongs to. Each one lists the roles in it, what each role brings, what it gets in return, and how to apply.</p>
             <div className="pgroups">
               {PARTNER_GROUPS.map((g) => (
                 <details key={g.key} className="pgroup">
-                  <summary><span className="pg-name">{g.label}</span><span className="pg-line">{g.line}</span></summary>
+                  <summary><h3 className="pg-name">{g.label}</h3><span className="pg-line">{g.line}</span></summary>
                   <ul className="plist">
                     {Object.entries(PARTNER_TYPES).filter(([, t]) => t.group === g.key).map(([k, t]) => (
                       <li key={k}>

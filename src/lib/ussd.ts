@@ -14,6 +14,7 @@ import { fmtNGN } from './money';
 import { position, entriesOf } from './finance';
 import { referencePrice } from './valuation';
 import { notifyFarmer } from './notify';
+import { answer as helperAnswer, textAnswer as helperText } from './agents/farmer-helper';
 
 const MAX_TRIES = 3, LOCK_HOURS = 24, SCREEN = 182;
 const pinKey = (farmerId: string, pin: string) => hmac(`ussd-pin:${farmerId}:${pin}`);
@@ -39,7 +40,7 @@ function fit(head: string, lines: string[], tail = '') {
   return out;
 }
 
-export const MENU = 'CON StorageX\n1 My produce\n2 My loans\n3 Sales and payments\n4 Prices today\n5 Ask Kitovu to call me';
+export const MENU = 'CON StorageX\n1 My produce\n2 My loans\n3 Sales and payments\n4 Prices today\n5 Ask Kitovu to call me\n6 Worth and owed\n7 Text me worth and owed';
 
 async function receiptsScreen(fid: string) {
   const rs = await db.all<any>(`SELECT r.receipt_no, r.status, c.name AS crop, b.remaining_kg::float AS left
@@ -133,13 +134,24 @@ export async function ussd(i: { sessionId?: string; phoneNumber?: string; text?:
 
   const [choice, sub] = parts;
   if (choice === undefined) { await log('menu', f.id); return MENU; }
-  const screen = ({ '1': 'produce', '2': 'loans', '3': 'sales', '4': 'prices', '5': 'callback' } as Record<string, string>)[choice];
+  const screen = ({ '1': 'produce', '2': 'loans', '3': 'sales', '4': 'prices', '5': 'callback', '6': 'balance', '7': 'balance_sms' } as Record<string, string>)[choice];
   if (!screen) return 'END Wrong choice. Please dial again.';
   await log(screen, f.id);
   if (screen === 'produce') return receiptsScreen(f.id);
   if (screen === 'loans') return loansScreen(f.id);
   if (screen === 'sales') return salesScreen(f.id);
   if (screen === 'prices') return pricesScreen(f);
+  if (screen === 'balance') {
+    const a = (await helperAnswer(f.id))!;
+    if (a.text.length <= SCREEN - 4) return 'END ' + a.text;
+    // Too long for one screen (often the case with accents): the numbers alone, and the full answer by text.
+    void helperText(f.id);
+    return 'END ' + fit('StorageX:', [`In store ${a.vars.held}`, `Worth ${a.vars.worth}`, `Owe ${a.vars.owed}`, `Due ${a.vars.due}`], 'Full answer sent by text.');
+  }
+  if (screen === 'balance_sms') {
+    const r = await helperText(f.id);
+    return r.status === 'sent' ? 'END We have sent it to you by text.' : r.status === 'duplicate' ? 'END We sent it within the last hour. Please check your messages.' : 'END We could not send a text now. Choose 6 to see it on screen.';
+  }
   if (sub === undefined) return 'CON Kitovu will call you about:\n1 A receipt\n2 A loan\n3 A payment\n4 My PIN\n5 Something else';
   const topic = TOPICS[Number(sub) - 1];
   if (!topic) return 'END Wrong choice. Please dial again.';
@@ -176,5 +188,5 @@ export async function handleCallback(a: Actor, id: string, note: string) {
 
 export async function ussdStatus(farmerId: string) {
   return db.get<any>(`SELECT ussd_pin_set_at, ussd_failed, ussd_locked_until, language, sms_reminders,
-    (SELECT max(created_at) FROM ussd_log WHERE farmer_id=$1 AND screen IN ('menu','produce','loans','sales','prices','callback')) AS last_used FROM farmers WHERE id=$1`, farmerId);
+    (SELECT max(created_at) FROM ussd_log WHERE farmer_id=$1 AND screen IN ('menu','produce','loans','sales','prices','callback','balance','balance_sms')) AS last_used FROM farmers WHERE id=$1`, farmerId);
 }

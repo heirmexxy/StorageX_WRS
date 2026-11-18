@@ -12,6 +12,10 @@ export interface ReceiptDoc {
   issued_at: Date | string; intake_ref?: string | null; lot?: string | null;
   issued_by?: string | null; received_by?: string | null;
   url: string; key_id?: string | null; signature?: string | null;
+  /** Value at storage: the reference price on the day of issue, fixed on the receipt. */
+  value?: { kobo_per_kg: number; kobo: number; basis: string } | null;
+  /** The policy that covered the warehouse when the receipt was issued. */
+  insurance?: { insurer: string; policy_no?: string | null; cover_to?: Date | string | null } | null;
 }
 
 export const COMPANY = 'Kitovu Technology Company Limited, RC 1348965, Kitovu Business Hub, Iseyin-Saki Expressway, Iseyin, Oyo State';
@@ -27,6 +31,25 @@ export const TERMS = [
 ];
 
 export const kgText = (n: number) => `${n.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`;
+const naira = (kobo: number) => `NGN ${(kobo / 100).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export const dayText = (d: Date | string) => new Date(d).toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'short', year: 'numeric' });
+/** "Value at storage" lines, shared by the PDF and the web view. */
+export function valueLines(d: ReceiptDoc) {
+  if (!d.value) return { amount: 'Not valued', detail: 'No market price had been approved for this crop when the receipt was issued. The live record shows today’s value once one is.' };
+  return { amount: naira(d.value.kobo), detail: `${naira(d.value.kobo_per_kg)} per kg on the day of issue: ${d.value.basis}. Today’s value is on the live record.` };
+}
+/** The value block from a receipt row's stored issue price. */
+export function valueFromRow(r: { issue_kobo_per_kg: number | null; issue_value_kobo: number | null; issue_price: any; wh_state?: string }) {
+  if (!r.issue_kobo_per_kg || r.issue_value_kobo == null) return null;
+  const b = r.issue_price ?? {};
+  const range = b.from && b.to ? `, ${dayText(b.from + 'T12:00:00Z').replace(/ \d{4}$/, '')} to ${dayText(b.to + 'T12:00:00Z')}` : '';
+  const where = b.scope === 'state' ? `${r.wh_state ?? 'State'} State reference price` : 'national reference price';
+  return { kobo_per_kg: r.issue_kobo_per_kg, kobo: r.issue_value_kobo, basis: `${where}, the median of ${b.observations ?? 'several'} approved market prices${range}` };
+}
+export function insuranceText(d: ReceiptDoc) {
+  if (d.insurance) return `${d.insurance.insurer}${d.insurance.policy_no ? `, policy ${d.insurance.policy_no}` : ''}${d.insurance.cover_to ? `, cover to ${dayText(d.insurance.cover_to)}` : ''}`;
+  return d.insured ? 'Current policy on record' : 'No current policy on record';
+}
 export const whenText = (d: Date | string) => new Date(d).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WAT';
 
 /** Label and value pairs in reading order, shared by the PDF and the web view. */
@@ -37,7 +60,7 @@ export function facts(d: ReceiptDoc): [string, string][] {
     ['Commodity', `${d.commodity}${d.grade ? `, grade ${d.grade}` : ''}`],
     ['Location', `${d.wh_state} State, warehouse tier ${d.wh_tier}`],
     ['Net weight', kgText(d.net_kg)],
-    ['Insurance', d.insured ? 'Current policy on record' : 'No current policy on record'],
+    ['Insurance', insuranceText(d)],
     ['Bags', d.bags ? `${d.bags} bags` : '—'],
     ['Issued', whenText(d.issued_at)],
     ['Moisture at intake', d.moisture != null ? `${d.moisture}%` : '—'],
@@ -83,6 +106,16 @@ export function receiptPdfBuffer(d: ReceiptDoc) {
     }
     y = rowEnd + 6; p.line(L, y - 4, qx - 20, y - 4, { gray: RULE }); y += 10;
   }
+
+  // Value at storage: the baseline a lender lends against
+  y += 4;
+  const v = valueLines(d), vh = 54;
+  p.shape([[L, y], [R, y], [R, y + vh], [L, y + vh]], { fill: '#EEF5F0' });
+  p.shape([[L, y], [L + 4, y], [L + 4, y + vh], [L, y + vh]], { fill: '#1F6B45' });
+  p.ctext(L + 14, y + 16, 'Value at storage', SOFT, { size: 8.5 });
+  p.ctext(L + 14, y + 36, v.amount, INK, { size: 16, bold: true });
+  p.wrap(L + 190, y + 16, v.detail, R - L - 200, { size: 8.5, gray: 0.2, lead: 11 });
+  y += vh + 10;
 
   // Terms
   y = Math.max(y + 6, 330);

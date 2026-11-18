@@ -7,6 +7,7 @@ import { LoansPage, BatchPage, LoanPage } from '../views/loans';
 import { act } from './admin';
 import { can } from '../lib/rbac';
 import { db } from '../lib/db';
+import { loanSeries } from '../lib/history';
 
 get('/loans', 'perm:finance.view', async (c) => {
   const kit = c.membership?.org_kind === 'kitovu';
@@ -47,7 +48,7 @@ post('/loans/lines/:id/decide', 'perm:finance.approve', (c) => act(c, '/loans', 
 get('/loans/:no', 'perm:finance.view', async (c) => {
   const ln = await F.loanView(c.actor, c.params.no);
   if (!ln) throw new HttpError(404, 'No such loan.');
-  c.html(render(<LoanPage c={c} ln={ln} />));
+  c.html(render(<LoanPage c={c} ln={ln} hist={await loanSeries(ln.id)} />));
 });
 post('/loans/:no/disburse', 'perm:finance.approve', (c) => act(c, `/loans/${c.params.no}`, async () => { await F.disburse(c.actor, c.params.no, c.body); return 'Disbursement recorded. The farmer has been told.'; }));
 post('/loans/:no/cancel', 'perm:finance.approve', (c) => act(c, `/loans/${c.params.no}`, async () => { await F.cancelLoan(c.actor, c.params.no, c.body.reason); return 'Loan cancelled; receipts released.'; }));

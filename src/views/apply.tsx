@@ -15,13 +15,13 @@ export function ApplyPage({ c, states, error, v = {} }: { c: Ctx; states: { code
           <Csrf c={c} />
           <fieldset className="ptypes">
             <legend>How would you like to partner with us?</legend>
-            <p className="muted small">Open your group, then choose the option that fits you best.</p>
+            <p className="muted small">Tap the group your organisation belongs to, then pick the role that fits you.</p>
             {PARTNER_GROUPS.map((g) => {
               const types = Object.entries(PARTNER_TYPES).filter(([, t]) => t.group === g.key);
               const open = types.some(([k]) => k === chosen) || (!chosen && c.query.group === g.key);
               return (
                 <details key={g.key} className="ptgroup" open={open}>
-                  <summary><b>{g.label}</b><span>{g.line}</span></summary>
+                  <summary><h3>{g.label}</h3><span>{g.line}</span></summary>
                   {types.map(([k, t]) => (
                     <label key={k} className="ptype">
                       <input type="radio" name="type" value={k} defaultChecked={chosen === k} />

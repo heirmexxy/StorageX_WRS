@@ -34,6 +34,10 @@ export const EVENTS: Record<string, { label: string; vars: string[]; en: string;
     en: 'StorageX: loan {loan} with {lender} was due on {due} and is not fully repaid. You owe {owed}. Please talk to {lender} or Kitovu.' },
   sale_paid: { label: 'Sale money sent to the farmer', vars: ['amount', 'sale', 'ref'],
     en: 'StorageX: {amount} from sale {sale} has been sent to you (ref {ref}). Your statement is available from your Kitovu field partner.' },
+  sale_offer: { label: 'A buyer has made an offer for the farmer’s produce', vars: ['buyer', 'price', 'crop', 'receipt', 'amount'],
+    en: 'StorageX: {buyer} offers {price} for your {crop} on receipt {receipt}, about {amount} before fees and any loan. Kitovu will ask if you agree. Do not share any code unless you agree.' },
+  balance_reply: { label: 'Farmer helper: what my produce is worth and what I owe', vars: ['held', 'worth', 'owed', 'due'],
+    en: 'StorageX: in store {held}, worth about {worth} at today’s prices. You owe {owed}. Next due date: {due}. Prices change; this is a guide, not an offer.' },
   ussd_pin_reset: { label: 'USSD PIN reset by Kitovu', vars: ['ussd'],
     en: 'StorageX: your PIN was reset by Kitovu. Dial {ussd} to choose a new one. If you did not ask for this, call Kitovu.' },
 };

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { asset } from '../lib/assets';
 import { renderToString } from 'react-dom/server';
 import type { Ctx } from '../lib/http';
 import { can, type Permission } from '../lib/rbac';
@@ -8,9 +9,9 @@ export const render = (el: ReactNode) => '<!doctype html>' + renderToString(el a
 /** Favicons and phone icons, shared by every page. */
 export function Icons() {
   return (<>
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="icon" href="/favicon.ico" sizes="48x48" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" href={asset('/favicon.svg')} type="image/svg+xml" />
+    <link rel="icon" href={asset('/favicon.ico')} sizes="48x48" />
+    <link rel="apple-touch-icon" href={asset('/apple-touch-icon.png')} />
     <meta name="theme-color" content="#1F6B45" />
   </>);
 }
@@ -20,7 +21,11 @@ export function Csrf({ c }: { c: Ctx }) { return <input type="hidden" name="_csr
 type NavItem = { href: string; label: string; perm?: Permission; kitovu?: boolean };
 // Grouped so the menu stays on one line; a group with one item for this person shows as a plain link.
 const NAV: { group: string; items: NavItem[] }[] = [
-  { group: 'Home', items: [{ href: '/app', label: 'Home' }] },
+  { group: 'Home', items: [
+    { href: '/app', label: 'Home' },
+    { href: '/alerts', label: 'Alerts', perm: 'warehouses.view' },
+    { href: '/dashboard', label: 'Business dashboard', perm: 'reports.view', kitovu: true },
+  ] },
   { group: 'Farmers', items: [
     { href: '/farmers', label: 'Farmers', perm: 'farmers.view' },
     { href: '/kyc/review', label: 'ID checks', perm: 'kyc.review' },
@@ -36,6 +41,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
   ] },
   { group: 'Finance', items: [
     { href: '/tower', label: 'Control tower', perm: 'finance.view' },
+    { href: '/stock-watch', label: 'Stock watch', perm: 'warehouses.view' },
+    { href: '/offers', label: 'Buyer offers', perm: 'finance.view' },
     { href: '/loans', label: 'Loans', perm: 'finance.view' },
     { href: '/prices', label: 'Prices', perm: 'finance.view' },
     { href: '/sales', label: 'Sales', perm: 'receipts.issue', kitovu: true },
@@ -59,13 +66,13 @@ export function Page({ c, title, children, bare, wide }: { c: Ctx; title: string
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{`${title} · StorageX`}</title>
-        <link rel="stylesheet" href="/app.css" />
-        <link rel="stylesheet" href="/receipt.css" />
+        <link rel="stylesheet" href={asset('/app.css')} />
+        <link rel="stylesheet" href={asset('/receipt.css')} />
         <Icons />
       </head>
       <body className={[bare && 'bare', wide && 'wide'].filter(Boolean).join(' ')}>
         <header className="top">
-          <a className="brand" href={s ? '/app' : '/'}><img src="/brand/storagex-logo.svg" alt="StorageX by Kitovu" width="150" height="40" /></a>
+          <a className="brand" href={s ? '/app' : '/'}><img src={asset('/brand/storagex-logo.svg')} alt="StorageX by Kitovu" width="150" height="40" /></a>
           {s && (
             <nav>
               {NAV.map(({ group, items }) => {

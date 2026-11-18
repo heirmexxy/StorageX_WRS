@@ -16,6 +16,7 @@ import { config } from './lib/config';
 import { closePool, db, openPool } from './lib/db';
 import { purgeExpiredFiles } from './lib/files';
 import { revalueAll } from './lib/valuation';
+import { priceWatch, alertPriceDrops } from './lib/alerts';
 import { sendReminders } from './lib/notify';
 import { runSteward } from './lib/agents/data-steward';
 import { migrate, seed } from './lib/migrate';
@@ -88,6 +89,9 @@ async function main() {
       const r = await revalueAll();
       console.log(`${r.day}: valued ${r.valued}, without price ${r.unpriced}, price falls over the alert level ${r.drops.length}`);
       for (const d of r.drops) console.log(`  ${d.receipt_no}: ${d.change_pct}%`);
+      await alertPriceDrops(r.drops, r.day);
+      const w = await priceWatch();
+      console.log(`price watch: ${w.loans} loans checked, ${w.raised} new alerts`);
       break;
     }
     case 'purge-files': {

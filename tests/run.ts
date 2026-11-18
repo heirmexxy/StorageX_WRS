@@ -1042,6 +1042,147 @@ async function main() {
     eq((await U.openCallbacks()).filter((x) => x.code === ada).length, 0);
   });
 
+  console.log('\nLender watch: value at storage, value over time, alerts, offers, credit history, WareGuard, farmer helper');
+  let watchNo = '', loan3 = '';
+  await t('value at storage and the insurance in force are fixed on the receipt at issue', async () => {
+    const r1 = makeRecord(ops, { weighings: [{ bags: 20, gross_kg: 2010, photo: '' }] });
+    r1.rec.weighings[0].photo = r1.rec.bag_photos[0]; r1.rec.evidence_hash = I.recordHash(r1.rec);
+    const out = await I.ingest(ops, JSON.stringify(r1.rec), r1.files, { deviceClock: new Date().toISOString() });
+    eq(out.result, 'stored');
+    await I.reviewIntake(admin, out.ref, 'accept', 'Checked for the lender-watch tests');
+    const iss = await Rc.issueFromIntake(admin, (await db.val<string>('SELECT id FROM intakes WHERE ref=$1', out.ref))!);
+    watchNo = iss.receipts[0].no;
+    const r = (await Rc.receiptByNo(admin, watchNo))!;
+    const ref = await V.referencePrice('MAZ', 'NI');
+    ok(ref.kobo_per_kg, 'a maize price exists by now');
+    eq(r.issue_kobo_per_kg, ref.kobo_per_kg); eq(r.issue_value_kobo, valueKobo(r.net_weight_kg, ref.kobo_per_kg!));
+    eq(r.insurer_name, 'Leadway', 'the warehouse policy in force when issued');
+    const ev = (await Rc.eventsOf(r.id))[0];
+    eq(ev.data.value_at_storage.kobo, r.issue_value_kobo);
+    await rejects(db.run('UPDATE receipts SET issue_value_kobo=1 WHERE id=$1', r.id));
+    const p = (await Rc.passport(r.verify_token, undefined, '9.9.9.7'))!;
+    eq(p.value_at_storage!.kobo, r.issue_value_kobo); ok(p.insurance!.startsWith('Leadway'));
+    const pdf = (await Rc.receiptPdf(admin, watchNo)).pdf.toString('latin1');
+    ok(pdf.includes('Value at storage') && pdf.includes('NGN'), 'the printed receipt carries the value at storage');
+  });
+  await t('value over time: a receipt starts at its value at storage; loans and the book add up per day', async () => {
+    const prod = (await F.productsOf(accionId)).find((p) => p.name === 'Harvest 90');
+    const b = await F.createBatch(ops, prod.id);
+    await F.addLine(ops, b.id, { farmer: ada, receipts: watchNo });
+    await F.submitBatch(ops, b.id, (id) => reviewLine(id, null));
+    const line = (await F.batchView(officer, b.ref))!.lines[0];
+    ok(JSON.stringify(line.review).includes('Credit history'), 'the loan review shows the credit history');
+    await F.decideLine(officer, line.id, true, {});
+    loan3 = (await F.batchView(officer, b.ref))!.lines[0].loan_no;
+    await F.disburse(officer2, loan3, { reference: 'TRF-0303' });
+    const r = (await Rc.receiptByNo(admin, watchNo))!;
+    const d = (n: number) => new Date(Date.now() + n * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' });
+    for (const [k, f] of [[1, 1.05], [2, 0.97]] as const)
+      await db.run(`INSERT INTO receipt_valuations (receipt_id, valued_on, held_kg, kobo_per_kg, market_value_kobo, haircut_bp, max_ltv_bp, basis) VALUES ($1,$2,$3,$4,$5,1500,7000,'{}')`,
+        r.id, d(k), r.net_weight_kg, Math.round(r.issue_kobo_per_kg! * f), Math.round(r.issue_value_kobo! * f));
+    const { receiptSeries, loanSeries, bookSeries, addUp } = await import('../src/lib/history');
+    const s = await receiptSeries(r.id);
+    ok(s.length >= 3, JSON.stringify(s)); eq(s[0].kobo, r.issue_value_kobo); eq(s.at(-1)!.kobo, Math.round(r.issue_value_kobo! * 0.97));
+    const sum = addUp([[{ on: '2026-01-01', kobo: 10, per_kg: 1, kg: 1 }, { on: '2026-01-03', kobo: 30, per_kg: 1, kg: 1 }], [{ on: '2026-01-02', kobo: 5, per_kg: 1, kg: 1 }]]);
+    eq(sum, [{ on: '2026-01-01', kobo: 10 }, { on: '2026-01-02', kobo: 15 }, { on: '2026-01-03', kobo: 35 }], 'carried forward, then added');
+    const ln = (await db.get<{ id: string }>('SELECT id FROM loans WHERE loan_no=$1', loan3))!;
+    const ls = (await loanSeries(ln.id))!;
+    ok(ls.value.length >= 1 && ls.owed.length === ls.value.length && ls.owed[0].kobo > 0, JSON.stringify(ls));
+    ok((await bookSeries(accionId)).value.length >= 1);
+    eq((await bookSeries(otherId)).value.length, 0, 'another lender sees nothing of this book');
+  });
+  const AL = await import('../src/lib/alerts');
+  await t('price watch warns the lender before the margin call, once a week, with a copy for Kitovu', async () => {
+    const src = (await db.val<string>(`SELECT id FROM price_sources WHERE kind='market_survey' LIMIT 1`))!;
+    const low: string[] = [];
+    for (let k = 0; k < 7; k++) low.push((await db.val<string>(`INSERT INTO price_observations (commodity_code, state_code, market, source_id, observed_on, unit, price_quoted_kobo, kobo_per_kg, status, entered_by, decided_by, decided_at)
+      VALUES ('MAZ','NI','Test market',$1,current_date,'kg',2000,2000,'approved',$2,$3,now()) RETURNING id`, src, ops.user.id, admin.user.id))!);
+    const w = await AL.priceWatch();
+    ok(w.raised >= 1, JSON.stringify(w));
+    const mine = await AL.alertsFor(officer);
+    const a = mine.find((x) => x.link === `/loans/${loan3}`)!;
+    ok(a && ['liquidation', 'margin_call', 'price_warning'].includes(a.kind) && a.body.includes('owes'), JSON.stringify(mine.map((m) => m.title)));
+    ok((await AL.alertsFor(admin)).some((x) => x.dedupe_key === a.dedupe_key), 'Kitovu has a copy');
+    eq((await AL.alertsFor(other)).filter((x) => x.link === `/loans/${loan3}`).length, 0, 'other lenders see nothing');
+    eq((await AL.priceWatch()).raised, 0, 'not raised twice in a week');
+    ok(await AL.unseenCount(officer) >= 1);
+    await AL.markSeen(officer, 'all'); eq(await AL.unseenCount(officer), 0);
+    await db.run(`UPDATE price_observations SET status='rejected' WHERE id = ANY($1)`, low);
+  });
+  await t('sale alert: the lender is told who is buying and at what price; the farmer is told the offer', async () => {
+    const s1 = await SL.proposeSale(ops, { buyer: 'Olam Grains', price: '650', receipts: watchNo });
+    const a = (await AL.alertsFor(officer)).find((x) => x.kind === 'sale_proposed')!;
+    ok(a.title.includes('Olam Grains') && a.title.includes('650') && /repay/.test(a.body), a.title + ' / ' + a.body);
+    ok(sentForTests.some((m) => m.text.includes('Olam Grains offers')), 'farmer told the offer');
+    await SL.cancelSale(ops, s1.id, 'Buyer withdrew the offer');
+    ok((await AL.alertsFor(officer)).some((x) => x.kind === 'sale_cancelled'));
+  });
+  await t('buyer offers are sorted best first for each lot of pledged stock, with what each would repay', async () => {
+    const { sortOffers } = await import('../src/lib/agents/offer-sorter');
+    const bo = (await db.val<string>(`SELECT id FROM price_sources WHERE kind='buyer_offer' LIMIT 1`))!;
+    for (const [mkt, p, st] of [['Flour Mills Minna', 70000, 'NI'], ['Kano Feeds', 72000, 'KN'], ['Small Trader', 40000, 'NI']] as const)
+      await db.run(`INSERT INTO price_observations (commodity_code, state_code, market, source_id, observed_on, unit, price_quoted_kobo, kobo_per_kg, status, entered_by, decided_by, decided_at, note)
+        VALUES ('MAZ',$1,$2,$3,current_date,'kg',$4,$4,'approved',$5,$6,now(),'written offer')`, st, mkt, bo, p, ops.user.id, admin.user.id);
+    const lots = await sortOffers(officer);
+    const lot = lots.find((l) => l.crop === 'Maize')!;
+    ok(lot && lot.offers.length >= 3, JSON.stringify(lots.map((l) => l.crop)));
+    eq(lot.offers[0].buyer, 'Flour Mills Minna', 'a local offer beats a slightly higher one from another state');
+    ok(lot.offers.find((o: any) => o.buyer === 'Kano Feeds')!.flags.some((f: string) => f.includes('transport')));
+    ok(lot.advice.startsWith('Best: Flour Mills Minna'), lot.advice);
+    eq((await sortOffers(other)).length, 0, 'other lenders see none of it');
+  });
+  await t('credit history is worked out from the loans, and shown on the farmer record', async () => {
+    const { creditHistory } = await import('../src/lib/credit');
+    const f = (await R.farmerByCode(ops, ada))!;
+    const ch = await creditHistory(f.id);
+    ok(ch.loans.length >= 2 && ch.open >= 1, JSON.stringify(ch));
+    ok(['building', 'good', 'strong'].includes(ch.tier) || ch.tier === 'new', ch.tier);
+    ok(ch.summary.includes('running'));
+  });
+  await t('WareGuard: a damp store opens one alert with advice for the warehouse and the lender, and closes when it dries', async () => {
+    const WG = await import('../src/lib/wareguard');
+    const { playbook } = await import('../src/lib/agents/wareguard-explainer');
+    eq((await WG.health([wh.id]))[0].state, 'none', 'nothing until Titan sends readings');
+    await WG.upsertDevice(wh.id, 'WG-TEST-1', 'Bay 1, north wall');
+    const now = new Date(), h = (n: number) => new Date(now.getTime() - n * 3_600_000).toISOString();
+    await WG.recordReadings('WG-TEST-1', [{ at: h(4), temp_c: 27, rh_pct: 62, door_open: false }, { at: h(3), temp_c: 27, rh_pct: 84, door_open: false }, { at: h(1), temp_c: 27, rh_pct: 86, door_open: false }], now);
+    const open = await db.all<any>(`SELECT * FROM sensor_alerts WHERE ended_at IS NULL AND kind='high_humidity'`);
+    eq(open.length, 1); eq(open[0].severity, 'urgent', '16 points over the limit');
+    ok(open[0].advice.actions.length >= 4 && /aflatoxin/.test(open[0].advice.why), JSON.stringify(open[0].advice));
+    ok((await AL.alertsFor(officer)).some((x) => x.kind === 'warehouse_condition'), 'the lender with stock there is told');
+    await WG.recordReadings('WG-TEST-1', [{ at: h(0.5), temp_c: 27, rh_pct: 87 }], now);
+    eq(Number(await db.val(`SELECT count(*) FROM sensor_alerts WHERE kind='high_humidity'`)), 1, 'still one alert while it lasts');
+    await WG.recordReadings('WG-TEST-1', [{ at: now.toISOString(), temp_c: 26, rh_pct: 64, door_open: false }], now);
+    eq(Number(await db.val(`SELECT count(*) FROM sensor_alerts WHERE kind='high_humidity' AND ended_at IS NULL`)), 0, 'closed when back within limits');
+    const later = new Date(now.getTime() + 3 * 3_600_000);
+    eq(await WG.sweepOffline(later), 1);
+    ok((await db.val(`SELECT 1 FROM sensor_alerts WHERE kind='offline' AND ended_at IS NULL`)));
+    const hh = (await WG.health([wh.id]))[0]; eq(hh.devices, 1);
+    const door = playbook({ kind: 'door_open', warehouse: 'X', device: null, value: null, limit: 30, minutes: 45, crops: [], pledged_kg: 100, release_ordered: false });
+    eq(door.urgency, 'urgent'); ok(door.actions.some((x) => x.includes('stock count')));
+    await rejects(WG.recordReadings('NOPE', []));
+  });
+  await t('farmer helper: worth and owed on USSD and by text, in the farmer’s language once a speaker approves it', async () => {
+    const H = await import('../src/lib/agents/farmer-helper');
+    const at = (text: string) => U.ussd({ sessionId: 'S3', phoneNumber: adaRow.phone_e164, text });
+    await at('5831*5831');
+    const o = await at('5831*6');
+    ok(o.startsWith('END ') && o.length <= 182 && /owe|Owe/.test(o), o);
+    const draft = (await N.templateTable()).find((e) => e.event === 'balance_reply')!.langs.find((l: any) => l.language === 'ha')!.draft;
+    ok(draft && draft.body.includes('{owed}'), 'Hausa wording ships as a draft');
+    const f = (await R.farmerByCode(ops, ada))!;
+    await N.setFarmerMessaging(ops, f.id, { language: 'ha', reminders: '1' });
+    ok((await H.answer(f.id))!.text.startsWith('StorageX: in store'), 'English until approved');
+    await N.decideTemplate(ops, draft.id, true);
+    const a = (await H.answer(f.id))!;
+    ok(a.text.startsWith('StorageX: kayanka') && a.translated && a.owed > 0, a.text);
+    eq(await H.smsKeyword(adaRow.phone_e164, 'kudi'), a.text);
+    eq(await H.smsKeyword(adaRow.phone_e164, 'hello'), null);
+    ok((await at('5831*7')).includes('sent it'));
+    ok(sentForTests.at(-1)!.text.startsWith('StorageX: kayanka'));
+    await N.setFarmerMessaging(ops, f.id, { language: 'en', reminders: '1' });
+  });
+
   console.log('\nAgents: data steward');
   await t('data steward opens one item per problem, closes it when fixed, and respects a person’s judgement', async () => {
     const madu = await R.createFarmer(ops, { full_name: 'Madu Okafor', phone: '08055550123', state_code: 'NI' });
@@ -1274,6 +1415,35 @@ async function main() {
     const dl = await req('GET', '/tower/loan-book.csv'); eq(dl.status, 200); ok(dl.text.split('\n')[0].includes('loan_no'), dl.text.slice(0, 200));
     delete jar.sx_sid;
     await signInAs(gateClerk); eq((await req('GET', '/tower')).status, 403); delete jar.sx_sid;
+  });
+  await t('lender watch pages: alerts, stock watch, value over time, buyer offers; the dashboard is Kitovu-only', async () => {
+    await signInAs(officer);
+    const tw = await req('GET', '/tower'); ok(tw.text.includes('Your book: stock value and what is owed') && tw.text.includes('<svg'), 'book chart on the tower');
+    const al = await req('GET', '/alerts'); eq(al.status, 200); ok(al.text.includes('Olam Grains'), 'sale alert listed');
+    const sw = await req('GET', '/stock-watch'); eq(sw.status, 200); ok(sw.text.includes('Value at storage'));
+    const one = await req('GET', '/stock-watch/WH-NI-MNA-02'); eq(one.status, 200); ok(one.text.includes('Conditions inside') && one.text.includes(watchNo));
+    ok(!one.text.includes('Close doors and vents'), 'lenders see the summary, not the warehouse checklist');
+    const rc = await req('GET', `/receipts/${watchNo}`); ok(rc.text.includes('Value over time') && rc.text.includes('Value at storage'), 'receipt value history');
+    const ln = await req('GET', `/loans/${loan3}`); ok(ln.text.includes('Stock value and what is owed'));
+    const of = await req('GET', '/offers'); eq(of.status, 200); ok(of.text.includes('Flour Mills Minna'));
+    eq((await req('GET', '/dashboard')).status, 403);
+    delete jar.sx_sid;
+    await signInAs(admin);
+    const db1 = await req('GET', '/dashboard'); eq(db1.status, 200);
+    for (const x of ['Revenue', 'Farmers', 'WareGuard health', 'All lenders: stock value and what is owed']) ok(db1.text.includes(x), x);
+    const csv = await req('GET', '/dashboard/revenue.csv'); eq(csv.status, 200); ok(csv.text.split('\n')[0].includes('Month') && csv.text.includes('Total (NGN)'), csv.text.slice(0, 80));
+    const kw = await req('GET', '/stock-watch/WH-NI-MNA-02'); ok(kw.text.includes('Bay 1') || kw.text.includes('device'), 'Kitovu sees the devices');
+    ok(!/style="/.test(db1.text.replace(/<i style="width[^"]*"/g, '')), 'charts use no inline styles (blocked by the security policy)');
+    delete jar.sx_sid;
+  });
+  await t('landing: the walkthrough plays on its own, muted and looping; partner groups read as headings', async () => {
+    const pg = await req('GET', '/');
+    ok(/<video[^>]*autoPlay|<video[^>]*autoplay/i.test(pg.text) && /\bmuted\b/.test(pg.text) && /\bloop\b/.test(pg.text) && /playsinline/i.test(pg.text), 'autoplay muted loop playsinline');
+    ok(!pg.text.includes('Under two minutes'));
+    ok(/landing\.css\?v=[0-9a-f]{8}/.test(pg.text) && /storagex-how-it-works\.mp4\?v=/.test(pg.text), 'versioned links so browsers never mix old and new files');
+    ok(pg.text.includes('<h3 class="pg-name">Financial institutions</h3>'));
+    const ap = await req('GET', '/apply'); ok(ap.text.includes('<h3>Financial institutions</h3>'));
+    const css = await req('GET', '/landing.css?v=whatever'); eq(css.status, 200);
   });
   await t('Receipt Passport and signing key are public', async () => {
     const r = (await Rc.receiptByNo(admin, rno))!;

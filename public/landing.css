@@ -120,7 +120,7 @@ main > section { padding: 72px max(24px, calc((100vw - 1120px) / 2)); }
 .pgroup > summary::-webkit-details-marker { display: none; }
 .pgroup > summary::after { content: '+'; font-family: var(--cond); font-weight: 800; font-size: 30px; line-height: 1; color: var(--green); }
 .pgroup[open] > summary::after { content: '−'; }
-.pg-name { font-family: var(--cond); font-weight: 800; font-size: 28px; line-height: 1.1; }
+.pg-name { margin: 0; font-family: var(--cond); font-weight: 800; font-size: 28px; line-height: 1.1; }
 .pg-line { color: var(--soft); }
 .pgroup .plist { padding-bottom: 18px; }
 .partners .farmers { background: var(--sack); padding: 18px 20px 20px; border-top: 3px solid var(--maize); margin-top: 28px; max-width: 40em; }

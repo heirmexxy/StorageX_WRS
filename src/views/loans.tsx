@@ -2,6 +2,7 @@ import type { Ctx } from '../lib/http';
 import { can } from '../lib/rbac';
 import { fmtNGN } from '../lib/money';
 import { Page, Csrf, Field, Select, fmtDate, fmtDay } from './layout';
+import { ValueHistory } from './history';
 
 const pct = (bp: number | null) => (bp == null ? '—' : `${(bp / 100).toFixed(1)}%`);
 const N = (k: number) => fmtNGN(Math.round(k));
@@ -140,7 +141,7 @@ export function BatchPage({ c, b }: { c: Ctx; b: any }) {
   );
 }
 
-export function LoanPage({ c, ln }: { c: Ctx; ln: any }) {
+export function LoanPage({ c, ln, hist }: { c: Ctx; ln: any; hist?: { value: { on: string; kobo: number }[]; owed: { on: string; kobo: number }[] } | null }) {
   const lenderFin = c.membership?.org_id === ln.lender_org_id && can(c.membership, 'finance.approve');
   const p = ln.pos;
   return (
@@ -169,6 +170,7 @@ export function LoanPage({ c, ln }: { c: Ctx; ln: any }) {
           ) : <p className="muted">Nothing paid out yet.</p>}
         </section>
       </div>
+      {hist && <ValueHistory title="Stock value and what is owed" value={hist.value} owed={hist.owed} note="The stock line is the receipts behind this loan, valued each day at the reference price. The red line is what was owed that day, interest included. The gap between them is your cover." />}
       <section className="card">
         <h2>Pledged receipts</h2>
         <table><thead><tr><th>Receipt</th><th>Stock</th><th>Warehouse</th><th>Pledged</th><th>Status</th></tr></thead>

@@ -77,6 +77,19 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats, links }: { c: C
           {box('ussd.enabled')}
           <label className="field"><span>{LABELS['ussd.code']}</span><input name="ussd.code" defaultValue={s['ussd.code']} placeholder="*347*123#" /></label>
         </section>
+        <section className="card">
+          <h2>Alerts to lenders</h2>
+          <p className="muted">Lenders and Kitovu see alerts under <a href="/alerts">Alerts</a>: prices getting close to a loan’s limits, sales of pledged stock, and warehouse conditions from WareGuard.</p>
+          <label className="field"><span>{LABELS['alerts.ltv_warning_gap_pct']}</span><input name="alerts.ltv_warning_gap_pct" type="number" step="1" min="1" max="30" defaultValue={String(s['alerts.ltv_warning_gap_pct'])} /><small>With a margin call at 85% and 10 here, the lender is warned at 75%.</small></label>
+          {box('alerts.sms')}
+        </section>
+        <section className="card">
+          <h2>WareGuard limits</h2>
+          <p className="muted">Used once WareGuard readings arrive through Titan. Above these limits the warehouse team, Kitovu and every lender with stock there are alerted, with advice on what to do.</p>
+          {(['wareguard.max_temp_c', 'wareguard.max_rh_pct', 'wareguard.door_open_minutes', 'wareguard.offline_minutes'] as const).map((k) => (
+            <label className="field" key={k}><span>{LABELS[k]}</span><input name={k} type="number" step="1" defaultValue={String(s[k])} /></label>
+          ))}
+        </section>
         <button className="primary">Save settings</button>
       </form>
     </Page>

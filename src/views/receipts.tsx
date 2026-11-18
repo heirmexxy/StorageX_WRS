@@ -7,6 +7,10 @@ import { can } from '../lib/rbac';
 import { qrSvg } from '../lib/qr';
 import { Page, Csrf, fmtDate, fmtDay, Pager } from './layout';
 import { ValuePanel } from './valuation';
+import { fmtNGN } from '../lib/money';
+import { ValueHistory } from './history';
+
+const changeText = (now: number, then: number) => { const d = ((now - then) / then) * 100; return `${d >= 0 ? 'up' : 'down'} ${Math.abs(d).toFixed(1)}%`; };
 
 const kg = (n: number | string) => `${Number(n).toLocaleString('en-NG', { maximumFractionDigits: 2 })} kg`;
 const TONE: Record<string, string> = { issued: 'ok', pledged: 'warn', financed: 'warn', sale_approved: 'warn', partially_released: 'warn', under_exception: 'warn' };
@@ -42,7 +46,7 @@ export function ReceiptsPage({ c, rows, q }: { c: Ctx; rows: Receipt[]; q: Recor
   );
 }
 
-export function ReceiptPage({ c, r, events, chainOk, url, bal, rels, value }: { c: Ctx; r: Receipt; events: any[]; chainOk: boolean; url: string; bal?: { remaining_kg: number; released_kg: number }; rels?: any[]; value?: any }) {
+export function ReceiptPage({ c, r, events, chainOk, url, bal, rels, value, history }: { c: Ctx; r: Receipt; events: any[]; chainOk: boolean; url: string; bal?: { remaining_kg: number; released_kg: number }; rels?: any[]; value?: any; history?: { on: string; kobo: number }[] | null }) {
   const kitovu = c.membership?.org_kind === 'kitovu';
   return (
     <Page c={c} title={r.receipt_no}>
@@ -57,6 +61,8 @@ export function ReceiptPage({ c, r, events, chainOk, url, bal, rels, value }: { 
             <dt>Moisture</dt><dd>{r.moisture_pct ? `${Number(r.moisture_pct)}%` : '—'}</dd>
             <dt>Warehouse</dt><dd>{`${r.wh_name} (${r.wh_code}), tier ${r.wh_tier}`}{r.can_back_loans ? '' : ' · cannot back loans now'}</dd>
             <dt>Issued</dt><dd>{`${fmtDate(r.issued_at)}${r.issued_by_name ? ` by ${r.issued_by_name}` : ''}`}</dd>
+            <dt>Value at storage</dt><dd>{r.issue_value_kobo != null ? <><b>{fmtNGN(r.issue_value_kobo, { decimals: false })}</b>{` at ${fmtNGN(r.issue_kobo_per_kg!)}/kg`}</> : 'Not valued at issue'}</dd>
+            <dt>Insurance at issue</dt><dd>{r.insurer_name ? `${r.insurer_name}${r.policy_number ? `, policy ${r.policy_number}` : ''}${r.cover_to ? `, cover to ${fmtDay(r.cover_to)}` : ''}` : 'No active policy on record when issued'}</dd>
             <dt>Delivery</dt><dd>{r.intake_ref && can(c.membership, 'stock.manage') ? <a href={`/intakes/${r.intake_ref}`}>{r.intake_ref}</a> : r.intake_ref ?? 'old system'}{r.lots && r.lots > 1 ? ` · receipt ${r.lot_no} of ${r.lots}` : ''}</dd>
             {r.closed_at && <><dt>Closed</dt><dd>{`${fmtDate(r.closed_at)}${r.closed_reason && kitovu ? ` — ${r.closed_reason}` : ''}`}</dd></>}
           </dl>
@@ -68,6 +74,7 @@ export function ReceiptPage({ c, r, events, chainOk, url, bal, rels, value }: { 
         </section>
       </div>
       {value && <ValuePanel v={value} />}
+      {history && <ValueHistory title="Value over time" value={history} />}
       <section className="card">
         <h2>History</h2>
         <p className={chainOk ? 'ok' : 'bad'}>{chainOk ? `History intact: ${events.length} event${events.length === 1 ? '' : 's'}, each sealed to the one before.` : 'History check FAILED: an event does not match its seal. Report this to Kitovu at once.'}</p>
@@ -131,7 +138,9 @@ export function PassportPage({ c, p, notice, doc }: { c: Ctx; p: any; notice?: s
           {p.held_kg !== p.net_kg && <><dt>Still held</dt><dd><b>{kg(p.held_kg)}</b></dd></>}
           {p.moisture && <><dt>Moisture at intake</dt><dd>{`${Number(p.moisture)}%`}</dd></>}
           <dt>Warehouse</dt><dd>{`${p.warehouse} (tier ${p.tier})`}</dd>
-          <dt>Insurance</dt><dd>{p.insured ? 'Current policy on record' : 'No current policy on record'}</dd>
+          <dt>Insurance</dt><dd>{p.insurance ?? (p.insured ? 'Current policy on record' : 'No current policy on record')}</dd>
+          <dt>Value at storage</dt><dd>{p.value_at_storage ? <><b>{fmtNGN(p.value_at_storage.kobo, { decimals: false })}</b>{` at ${fmtNGN(p.value_at_storage.per_kg)}/kg on the day of issue`}</> : 'Not valued at issue'}</dd>
+          {p.value_today && <><dt>Value today</dt><dd><b>{fmtNGN(p.value_today.kobo, { decimals: false })}</b>{` at ${fmtNGN(p.value_today.per_kg)}/kg${p.value_at_storage ? ` (${changeText(p.value_today.kobo, p.value_at_storage.kobo)} since storage)` : ''}, valued ${fmtDay(p.value_today.on)}`}</dd></>}
           <dt>Owner</dt><dd>{p.owner}</dd>
           {p.lot && <><dt>Part</dt><dd>{`Receipt ${p.lot} from one delivery`}</dd></>}
           <dt>Issued</dt><dd>{fmtDate(p.issued_at)}</dd>

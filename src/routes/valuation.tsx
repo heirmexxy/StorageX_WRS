@@ -4,6 +4,7 @@ import { states, commodities } from '../lib/registry';
 import { render } from '../views/layout';
 import { PricesPage, PolicyPage } from '../views/valuation';
 import { act } from './admin';
+import { priceWatch, alertPriceDrops } from '../lib/alerts';
 import { can } from '../lib/rbac';
 import { UserError } from '../lib/errors';
 
@@ -17,7 +18,9 @@ post('/prices/sources', 'perm:finance.configure', (c) => act(c, '/prices', async
 post('/prices/revalue', 'perm:finance.configure', (c) => act(c, '/prices', async () => {
   if (c.membership?.org_kind !== 'kitovu') throw new UserError('Only Kitovu runs the revaluation.');
   const r = await V.revalueAll();
-  return `Revalued ${r.valued} receipt(s)${r.unpriced ? `; ${r.unpriced} without a usable price` : ''}${r.drops.length ? `; ${r.drops.length} fell by more than the alert level` : ''}. (Receipts already valued today are kept as they were.)`;
+  await alertPriceDrops(r.drops, r.day);
+  const w = await priceWatch();
+  return `${w.raised ? `${w.raised} new price alert(s) for lenders. ` : ''}Revalued ${r.valued} receipt(s)${r.unpriced ? `; ${r.unpriced} without a usable price` : ''}${r.drops.length ? `; ${r.drops.length} fell by more than the alert level` : ''}. (Receipts already valued today are kept as they were.)`;
 }));
 post('/prices/:id', 'perm:finance.configure', (c) => act(c, '/prices', async () => { await V.decideObservation(c.actor, c.params.id, c.body.decision === 'approve', c.body.note); return c.body.decision === 'approve' ? 'Approved.' : 'Rejected.'; }));
 get('/valuation/policy', 'perm:finance.view', async (c) => c.html(render(<PolicyPage c={c} rows={await V.policies(c.actor)} />)));

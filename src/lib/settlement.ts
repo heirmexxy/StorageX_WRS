@@ -21,6 +21,7 @@ import { clean } from './util';
 import { receiptBalance } from './stock';
 import { position, entriesOf } from './finance';
 import type { Upload } from './http';
+import { raise } from './alerts';
 
 const isKitovu = (a: Actor) => a.membership?.org_kind === 'kitovu';
 const ymd = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' });
@@ -63,7 +64,37 @@ export async function proposeSale(a: Actor, i: { buyer?: string; buyer_org?: str
       await db.run(`INSERT INTO sale_items (sale_id, receipt_id, farmer_id, kg, gross_kobo, previous_status, lender_org_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`, id, x.receipt_id, x.farmer_id, x.kg, valueKobo(x.kg, perKg), x.status, x.lender);
     await audit(actorOf(a), 'sale.proposed', { entity: 'sale', entityId: id, data: { ref, buyer, kobo_per_kg: perKg, receipts: items.length } });
     return { id, ref };
-  });
+  }).then(async (r) => { await saleAlerts(r.id, 'sale_proposed'); return r; });
+}
+
+/** Tell every lender with stock in a sale who is buying, at what price, and whether it clears their loans; and
+ *  tell each farmer the offer before anyone asks for their agreement. */
+export async function saleAlerts(saleId: string, kind: 'sale_proposed' | 'sale_approved' | 'sale_cancelled' | 'sale_settled') {
+  const s = await db.get<any>(`SELECT s.*, s.kobo_per_kg::float AS perkg, c.name AS crop, w.name AS wh_name FROM sales s JOIN commodities c ON c.code=s.commodity_code JOIN warehouses w ON w.id=s.warehouse_id WHERE s.id=$1`, saleId);
+  if (!s) return;
+  const items = await db.all<any>(`SELECT x.*, x.kg::float AS kgf, x.gross_kobo::float AS gross, r.receipt_no, li.loan_id, ln.loan_no FROM sale_items x JOIN receipts r ON r.id=x.receipt_id
+    LEFT JOIN liens li ON li.receipt_id=x.receipt_id AND (li.released_at IS NULL OR li.release_reason LIKE 'sold under%') LEFT JOIN loans ln ON ln.id=li.loan_id WHERE x.sale_id=$1`, saleId);
+  const byLender = new Map<string, any[]>();
+  for (const x of items) if (x.lender_org_id) byLender.set(x.lender_org_id, [...(byLender.get(x.lender_org_id) ?? []), x]);
+  const price = `${fmtNGN(s.perkg)}/kg`;
+  for (const [org, xs] of byLender) {
+    const kg = xs.reduce((n, x) => n + x.kgf, 0), gross = xs.reduce((n, x) => n + x.gross, 0);
+    let owed = 0;
+    for (const id of [...new Set(xs.map((x) => x.loan_id).filter(Boolean))]) { const ln = await db.get<any>('SELECT * FROM loans WHERE id=$1', id); if (ln) owed += position(ln, await entriesOf(id)).outstanding; }
+    const loans = [...new Set(xs.map((x) => x.loan_no).filter(Boolean))].join(', ');
+    const what = `${kg.toLocaleString('en-NG')} kg ${s.crop} at ${s.wh_name} (${xs.length === 1 ? `receipt ${xs[0].receipt_no}` : `${xs.length} receipts`}${loans ? `, loan ${loans}` : ''})`;
+    const cover = owed > 0 ? ` Your loan${loans.includes(',') ? 's' : ''} owe ${fmtNGN(owed, { decimals: false })} today; the sale brings ${fmtNGN(gross, { decimals: false })} before Kitovu fees, ${gross >= owed ? 'enough to repay in full' : `about ${Math.round((gross / owed) * 100)}% of it`}.` : '';
+    const msg = {
+      sale_proposed: { level: 'warn' as const, title: `${s.buyer_name} offers ${price} for stock pledged to you`, body: `Sale ${s.ref}: ${s.buyer_name} offers ${price} for ${what}.${cover} Approve or decline it on the sale page.` },
+      sale_approved: { level: 'info' as const, title: `Sale ${s.ref} agreed at ${price}`, body: `Everyone has agreed to sell ${what} to ${s.buyer_name}. The stock is committed to the sale; you are paid first when the buyer pays.` },
+      sale_cancelled: { level: 'warn' as const, title: `Sale ${s.ref} was cancelled`, body: `The sale of ${what} to ${s.buyer_name} was cancelled. Your pledge is unchanged.` },
+      sale_settled: { level: 'info' as const, title: `Sale ${s.ref} paid out`, body: `${s.buyer_name} paid for ${what}. Your share has been posted to the loan as a repayment.` },
+    }[kind];
+    await raise(org, { kind, ...msg, link: `/sales/${s.ref}`, key: `${kind}:${s.ref}` });
+  }
+  if (!byLender.size) await raise(null, { kind, level: 'info', title: `Sale ${s.ref}: ${kind.replace('sale_', '')}`, body: `${s.buyer_name}, ${price}, ${items.length} receipt(s) of ${s.crop} at ${s.wh_name}.`, link: `/sales/${s.ref}`, key: `${kind}:${s.ref}` });
+  if (kind === 'sale_proposed') for (const x of items)
+    await notify(x.farmer_id, 'sale_offer', `${s.ref}:${x.receipt_no}`, { buyer: s.buyer_name, price, crop: s.crop, receipt: x.receipt_no, amount: fmtNGN(x.gross, { decimals: false }) });
 }
 
 async function item(itemId: string) {
@@ -115,7 +146,8 @@ async function maybeApprove(saleId: string, userId: string) {
       await db.run(`INSERT INTO receipt_events (receipt_id, event_type, occurred_at, actor, data) VALUES ($1,'sale_approved',now(),$2,$3)`, x.receipt_id, `user:${userId}`, JSON.stringify({ sale: s.ref, buyer: s.buyer_name }));
     }
     await db.run(`UPDATE sales SET status='approved', approved_at=now() WHERE id=$1`, saleId);
-  });
+    return true;
+  }).then(async (done) => { if (done) await saleAlerts(saleId, 'sale_approved'); });
 }
 
 export async function cancelSale(a: Actor, saleId: string, reason: string) {
@@ -136,6 +168,7 @@ export async function cancelSale(a: Actor, saleId: string, reason: string) {
     await db.run(`UPDATE sales SET status='cancelled', note=COALESCE(note || ' — ', '') || $2 WHERE id=$1`, saleId, `cancelled: ${clean(reason, 200)}`);
     await audit(actorOf(a), 'sale.cancelled', { entity: 'sale', entityId: saleId, data: { reason: clean(reason, 200) } });
   });
+  await saleAlerts(saleId, 'sale_cancelled');
 }
 
 /** Release orders for every receipt in an approved sale, to the buyer's collector. */
@@ -281,7 +314,7 @@ export async function settle(a: Actor, saleId: string) {
     await db.run(`UPDATE sales SET status='settled' WHERE id=$1`, saleId);
     await audit(actorOf(a), 'sale.settled', { entity: 'sale', entityId: saleId, data: { ref: s.ref, ...totals } });
     return totals;
-  });
+  }).then(async (t) => { await saleAlerts(saleId, 'sale_settled'); return t; });
 }
 
 export async function markPaid(a: Actor, lineId: string, reference: string) {

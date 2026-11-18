@@ -22,6 +22,9 @@ import './routes/loans';
 import './routes/sales';
 import './routes/tower';
 import './routes/messages';
+import './routes/watch';
+import './routes/dashboard';
+import './routes/offers';
 
 const CSP = ["default-src 'self'", "img-src 'self' data:", "style-src 'self'", "script-src 'self'", "form-action 'self'", "frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'"].join('; ');
 const STATIC: Record<string, string> = {

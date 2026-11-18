@@ -1,5 +1,6 @@
 import type { Ctx } from '../lib/http';
 import { can } from '../lib/rbac';
+import { fmtNGN } from '../lib/money';
 import type { Farmer, Issue, FieldPartner, Warehouse } from '../lib/registry';
 import { mask } from '../lib/registry';
 import { ID_TYPES, REJECT_REASONS, CONSENT_TEXT, type Submission } from '../lib/kyc';
@@ -94,6 +95,7 @@ export interface FarmerView {
   pm: { required: boolean; sms: boolean; voice: boolean; attested: boolean };
   deliveries: any[];
   messaging?: { msgs: any[]; ussd: any; languages: Record<string, string> };
+  credit?: any;
 }
 
 export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
@@ -251,6 +253,17 @@ export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
         </section>
       )}
 
+      {v.credit && (
+        <section className="card">
+          <h2>Credit history</h2>
+          <p><span className={`badge ${v.credit.tier === 'problem' ? 'bad' : v.credit.tier === 'new' ? '' : 'ok'}`}>{v.credit.label}</span>{` ${v.credit.summary}`}</p>
+          {v.credit.uplift_bp > 0 && <p className="small">{`On this record a lender may choose to allow up to ${v.credit.uplift_bp / 100} points more loan-to-value than its usual policy. The lender decides; StorageX does not change any limit.`}</p>}
+          {v.credit.loans.length > 0 && (
+            <table><thead><tr><th>Loan</th><th>Lender</th><th>Amount</th><th>Paid out</th><th>Due</th><th>Result</th></tr></thead>
+              <tbody>{v.credit.loans.map((l: any) => <tr key={l.loan_no}><td className="mono">{l.loan_no}</td><td>{l.lender}</td><td>{fmtNGN(l.principal, { decimals: false })}</td><td>{l.disbursed_on ? fmtDay(l.disbursed_on) : '—'}</td><td>{l.due_on ? fmtDay(l.due_on) : '—'}</td><td>{l.result}</td></tr>)}</tbody></table>
+          )}
+        </section>
+      )}
       {v.deliveries.length > 0 && (
         <section className="card">
           <h2>Deliveries</h2>

@@ -9,13 +9,16 @@ import { ReceiptsPage, ReceiptPage, PassportPage } from '../views/receipts';
 import { act } from './admin';
 import { receiptBalance, releasesOf } from '../lib/stock';
 import { valuationFor } from '../lib/valuation';
+import { receiptSeries } from '../lib/history';
+import { can } from '../lib/rbac';
 
 get('/receipts', 'perm:receipts.view', async (c) => c.html(render(<ReceiptsPage c={c} rows={await Rc.listReceipts(c.actor, { status: c.query.status, text: c.query.q, page: c.query.page })} q={c.query} />)));
 get('/receipts/:no', 'perm:receipts.view', async (c) => {
   const r = await Rc.receiptByNo(c.actor, c.params.no);
   if (!r) throw new HttpError(404, 'No receipt with that number, or you cannot see it.');
   c.html(render(<ReceiptPage c={c} r={r} events={await Rc.eventsOf(r.id)} chainOk={await Rc.chainOk(r.id)} url={Rc.verifyUrl(r)} bal={await receiptBalance(r.id)} rels={await releasesOf(r.id)}
-    value={['closed', 'settled', 'cancelled', 'expired'].includes(r.status) ? null : await valuationFor(c.actor, r)} />));
+    value={['closed', 'settled', 'cancelled', 'expired'].includes(r.status) ? null : await valuationFor(c.actor, r)}
+    history={can(c.membership, 'finance.view') ? await receiptSeries(r.id) : null} />));
 });
 get('/receipts/:no/pdf', 'perm:receipts.view', async (c) => {
   try { const { pdf, name } = await Rc.receiptPdf(c.actor, c.params.no); c.bytes(pdf, 'application/pdf', name); }

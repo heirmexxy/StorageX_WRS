@@ -1,6 +1,7 @@
 import type { Ctx } from '../lib/http';
 import { fmtNGN } from '../lib/money';
 import { Page, fmtDay } from './layout';
+import { ValueHistory } from './history';
 
 const N = (k: number) => fmtNGN(Math.round(k), { decimals: false });
 const pct = (bp: number | null) => (bp == null ? '—' : `${(bp / 100).toFixed(1)}%`);
@@ -19,7 +20,7 @@ function Shares({ title, rows }: { title: string; rows: { k: string; kobo: numbe
   );
 }
 
-export function TowerPage({ c, s, b, sites, w, check, kitovu }: { c: Ctx; s: any; b: any[]; sites: any[]; w: any; check: any; kitovu: boolean }) {
+export function TowerPage({ c, s, b, sites, w, check, kitovu, hist, alerts = 0 }: { c: Ctx; s: any; b: any[]; sites: any[]; w: any; check: any; kitovu: boolean; hist?: any; alerts?: number }) {
   const attention = [
     ...s.liquidation.map((l: any) => ({ l, sev: 'hold', text: `owes ${N(l.outstanding)}, ${pct(l.ltv_bp)} of the stock’s value: at or past your liquidation level (${pct(l.liquidation_ltv_bp)}). Ask Kitovu to arrange a sale or ask the farmer to repay.` })),
     ...s.margin.map((l: any) => ({ l, sev: 'review', text: `${pct(l.ltv_bp)} of the stock’s value, past your warning level (${pct(l.margin_call_ltv_bp)}).` })),
@@ -38,6 +39,9 @@ export function TowerPage({ c, s, b, sites, w, check, kitovu }: { c: Ctx; s: any
         <div><span className="muted">Loan ÷ stock value</span><b>{pct(s.ltv_bp)}</b><small>across the book</small></div>
         <div><span className="muted">Needs attention</span><b>{s.liquidation.length + s.margin.length + s.overdue.length + s.unpriced.length}</b><small>{`${s.due14.length} due within 14 days`}</small></div>
       </section>
+
+      {alerts > 0 && <p className="flash info"><a href="/alerts">{`${alerts} new alert${alerts === 1 ? '' : 's'}`}</a>{' about prices, sales or warehouse conditions.'}</p>}
+      {hist && hist.value.length > 0 && <ValueHistory title="Your book: stock value and what is owed" value={hist.value} owed={hist.owed} note="Every running loan together: the receipts behind them valued each day at the reference price, and what was owed each day. Open a loan or a receipt to see its own line." />}
 
       {!kitovu && check.done < check.items.length && (
         <section className="card">
@@ -64,9 +68,10 @@ export function TowerPage({ c, s, b, sites, w, check, kitovu }: { c: Ctx; s: any
         <h2>Where the stock is</h2>
         {sites.length ? (
           <table>
-            <thead><tr><th>Warehouse</th><th>Your stock</th><th>Insurance</th><th>Last count</th><th>Checks</th></tr></thead>
+            <thead><tr><th>Warehouse</th><th>Your stock</th><th>Conditions</th><th>Insurance</th><th>Last count</th><th>Checks</th></tr></thead>
             <tbody>{sites.map((x: any) => (
-              <tr key={x.id}><td>{x.name}<br /><small className="muted">{`${x.state} · tier ${x.tier} · ${x.status}`}</small></td><td>{kg(x.kg)}</td>
+              <tr key={x.id}><td><a href={`/stock-watch/${x.code}`}>{x.name}</a><br /><small className="muted">{`${x.state} · tier ${x.tier} · ${x.status}`}</small></td><td>{kg(x.kg)}</td>
+                <td>{x.wg?.devices ? <><i className={`dot ${x.wg.state === 'ok' ? 'ok' : x.wg.state === 'bad' ? 'bad' : 'warn'}`} />{`${x.wg.temp_c != null ? `${x.wg.temp_c.toFixed(1)}°C` : ''} ${x.wg.rh_pct != null ? `${x.wg.rh_pct.toFixed(0)}% RH` : ''}`}</> : <span className="muted">WareGuard not connected</span>}</td>
                 <td>{x.insured ? 'Current' : <span className="badge warn">none on record</span>}</td>
                 <td>{x.last_count ? fmtDay(x.last_count) : <span className="badge warn">never</span>}</td>
                 <td>{x.holds.length || x.under_review ? <ul className="flaglist">{x.under_review ? <li className="hold">{`${x.under_review} of your receipts under review`}</li> : null}{x.holds.map((h: string) => <li key={h} className="hold">{h}</li>)}</ul>

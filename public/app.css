@@ -133,10 +133,10 @@ img.mini { width: 90px; height: 64px; object-fit: cover; border-radius: 6px; bor
 .ptgroup { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; background: #fff; }
 .ptgroup > summary { cursor: pointer; padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; list-style: none; }
 .ptgroup > summary::-webkit-details-marker { display: none; }
-.ptgroup > summary b { font-size: 16px; color: var(--ink); }
-.ptgroup > summary b::after { content: ' +'; color: var(--brand); }
-.ptgroup[open] > summary b::after { content: ' −'; }
-.ptgroup > summary span { color: var(--muted); font-size: 14px; }
+.ptgroup > summary h3 { font-size: 16px; color: var(--ink); margin: 0; }
+.ptgroup > summary h3::after { content: ' +'; color: var(--brand); }
+.ptgroup[open] > summary h3::after { content: ' −'; }
+.ptgroup > summary > span { color: var(--muted); font-size: 14px; }
 .ptgroup[open] { padding: 0 12px 6px; }
 .ptgroup[open] > summary { padding-left: 4px; padding-right: 4px; }
 .ptgroup:has(input:checked) { border-color: var(--brand); }
@@ -181,3 +181,37 @@ header.top nav details.menu > div { position: absolute; top: 100%; left: -8px; z
 header.top nav details.menu > div a { display: block; padding: 8px 14px; }
 header.top nav details.menu summary { color: var(--muted); }
 header.top nav details.menu.on > summary, header.top nav details.menu[open] > summary { color: var(--ink); }
+
+/* Charts (views/charts.tsx) */
+.chart { margin: 8px 0 4px; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart .grid { stroke: #E3E7E1; stroke-width: 1; }
+.chart .tick { font-size: 11px; fill: #5B665F; font-variant-numeric: tabular-nums; }
+.chart .ln polyline { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.chart .ln circle { stroke: #fff; stroke-width: 1.5; }
+.chart .value polyline { stroke: #1F6B45; } .chart .value circle, .chart .bar.value { fill: #1F6B45; }
+.chart .owed polyline { stroke: #B3261E; stroke-dasharray: 6 4; } .chart .owed circle, .chart .bar.owed { fill: #B3261E; }
+.chart .base polyline { stroke: #E8B21E; } .chart .base circle, .chart .bar.base { fill: #E8B21E; }
+.chart .temp polyline { stroke: #C2410C; } .chart .temp circle { fill: #C2410C; }
+.chart .rh polyline { stroke: #2563EB; } .chart .rh circle { fill: #2563EB; }
+.chart .bar.soft { fill: #8FB9A0; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: #4E5A52; margin-top: 4px; }
+.legend .key::before { content: ''; display: inline-block; width: 14px; height: 4px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: #1F6B45; }
+.legend .owed::before { background: #B3261E; } .legend .base::before { background: #E8B21E; } .legend .soft::before { background: #8FB9A0; }
+.legend .temp::before { background: #C2410C; } .legend .rh::before { background: #2563EB; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.kpis > div { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: #fff; display: flex; flex-direction: column; gap: 2px; }
+.kpis b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.kpis small { color: var(--muted); }
+.alert-list { list-style: none; padding: 0; margin: 0; }
+.alert-list > li { border-left: 4px solid #8FB9A0; padding: 10px 12px; margin-bottom: 8px; background: #fff; border-radius: 0 6px 6px 0; }
+.alert-list > li.warn { border-left-color: #E8B21E; } .alert-list > li.urgent { border-left-color: #B3261E; }
+.alert-list > li.seen { opacity: .72; }
+.alert-list b { display: block; } .alert-list p { margin: 4px 0; }
+.wg { display: flex; gap: 14px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.wg span { white-space: nowrap; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #9AA59D; margin-right: 6px; }
+.dot.ok { background: #1F6B45; } .dot.warn { background: #E8B21E; } .dot.bad { background: #B3261E; }
+.offer-best { background: #EEF5F0; }
+
+.alert-list ol { margin: 6px 0; padding-left: 20px; }

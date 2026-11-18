@@ -42,6 +42,15 @@ export const DEFAULTS = {
   /** USSD status menu for farmers. The code is the one the network assigns, e.g. *347*123#. */
   'ussd.enabled': true,
   'ussd.code': '',
+  /** Warn a lender when a loan comes within this many points of its margin-call level. */
+  'alerts.ltv_warning_gap_pct': 10,
+  /** Also text alerts to lender and Kitovu staff who have a phone number on their account. */
+  'alerts.sms': false,
+  /** WareGuard limits: above these, the warehouse and the lenders with stock there are alerted. */
+  'wareguard.max_temp_c': 30,
+  'wareguard.max_rh_pct': 70,
+  'wareguard.door_open_minutes': 30,
+  'wareguard.offline_minutes': 60,
 };
 export type SettingKey = keyof typeof DEFAULTS;
 export type Settings = typeof DEFAULTS;
@@ -69,6 +78,12 @@ export const LABELS: Record<SettingKey, string> = {
   'inspector.farmer_30d_kg': 'Flag a farmer who delivers more than this in 30 days (kg)',
   'ussd.enabled': 'Farmers can check their status by USSD',
   'ussd.code': 'USSD code shown in texts (blank until the network assigns one)',
+  'alerts.ltv_warning_gap_pct': 'Warn lenders when a loan is within this many points of its margin-call level',
+  'alerts.sms': 'Also text alerts to lender and Kitovu staff with a phone number on their account',
+  'wareguard.max_temp_c': 'WareGuard: alert above this temperature (°C)',
+  'wareguard.max_rh_pct': 'WareGuard: alert above this relative humidity (%)',
+  'wareguard.door_open_minutes': 'WareGuard: alert when a door stays open longer than (minutes)',
+  'wareguard.offline_minutes': 'WareGuard: alert when a device has sent nothing for (minutes)',
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -94,7 +109,7 @@ export async function saveSettings(a: Actor, input: Partial<Record<SettingKey, u
     }
     else if (typeof def === 'number') {
       const v = Number(input[k]);
-      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000], 'notify.due_days': [1, 30], 'inspector.farmer_30d_kg': [1000, 1000000] } as Record<string, number[]>)[k] ?? [1, 180];
+      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000], 'notify.due_days': [1, 30], 'inspector.farmer_30d_kg': [1000, 1000000], 'alerts.ltv_warning_gap_pct': [1, 30], 'wareguard.max_temp_c': [15, 45], 'wareguard.max_rh_pct': [40, 95], 'wareguard.door_open_minutes': [5, 240], 'wareguard.offline_minutes': [10, 1440] } as Record<string, number[]>)[k] ?? [1, 180];
       if (!Number.isFinite(v) || v < lo || v > hi) throw new UserError(`${LABELS[k]}: between ${lo} and ${hi}.`);
       next[k] = v;
     }

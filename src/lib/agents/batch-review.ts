@@ -6,6 +6,7 @@ import { db } from '../db';
 import { config } from '../config';
 import { getSettings } from '../settings';
 import { referencePrice } from '../valuation';
+import { creditHistory } from '../credit';
 import { reconcile } from '../stock';
 import { fmtNGN } from '../money';
 import { defaultModel, type ModelCall } from './model';
@@ -48,12 +49,9 @@ export async function checksFor(lineId: string): Promise<Check[]> {
     const stale = rec?.flags.some((f: any) => f.text.includes('not counted'));
     add(`stock:${r.receipt_no}`, holds.length ? 'fail' : stale ? 'warn' : 'ok', holds.length ? holds.map((h: any) => h.text).join(' ') : stale ? 'Stock agrees with receipts, but some stacks are overdue a count.' : 'Ledger, counts and receipts agree.');
   }
-  const hist = await db.get<{ repaid: number; open: number; overdue: number; written_off: number }>(
-    `SELECT count(*) FILTER (WHERE status='repaid')::int AS repaid, count(*) FILTER (WHERE status='disbursed')::int AS open,
-            count(*) FILTER (WHERE status='disbursed' AND due_on < current_date)::int AS overdue, count(*) FILTER (WHERE status='written_off')::int AS written_off
-     FROM loans WHERE farmer_id=$1 AND line_id <> $2`, l.farmer_id, l.id);
-  add('history', hist!.written_off || hist!.overdue ? 'fail' : hist!.open ? 'warn' : 'ok',
-    hist!.repaid + hist!.open + hist!.written_off === 0 ? 'First loan through StorageX.' : `Previous StorageX loans: ${hist!.repaid} repaid, ${hist!.open} open${hist!.overdue ? ` (${hist!.overdue} overdue)` : ''}${hist!.written_off ? `, ${hist!.written_off} written off` : ''}.`);
+  const ch = await creditHistory(l.farmer_id, l.id);
+  add('history', ch.tier === 'problem' ? 'fail' : ch.open ? 'warn' : 'ok',
+    ch.tier === 'new' && !ch.open ? 'First loan through StorageX.' : `Credit history: ${ch.label.toLowerCase()}. ${ch.summary}${ch.uplift_bp ? ` A lender may choose to allow up to ${ch.uplift_bp / 100} points more loan-to-value for this record.` : ''}`);
   const share = Number(l.batch_total) ? Number(l.requested_kobo) / Number(l.batch_total) : 0;
   if (share > 0.4 && Number(l.batch_total) > Number(l.requested_kobo)) add('concentration', 'warn', `This farmer is ${(share * 100).toFixed(0)}% of the batch.`);
   return c;
