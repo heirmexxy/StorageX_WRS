@@ -5,7 +5,9 @@ import QRCode from '../vendor/qrcode/index.cjs';
 // @ts-ignore
 import ECL from '../vendor/qrcode/QRErrorCorrectLevel.cjs';
 
-const ascii = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/₦/g, 'NGN ').replace(/[^\x20-\x7e]/g, '?');
+// Latin-1 letters and signs (·, °, ñ…) are kept: WinAnsi matches Latin-1 there. Anything else is simplified.
+const ascii = (s: string) => s.replace(/…/g, '...').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/₦/g, 'NGN ')
+  .replace(/[^\x20-\x7e\xa0-\xff]/g, (ch) => ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7e]/g, '?'));
 const esc = (s: string) => ascii(s).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
 const n = (v: number) => (Math.round(v * 100) / 100).toString();
 
@@ -39,6 +41,46 @@ export class Pdf {
     const r = `${n(x)} ${n(this.h - y - hh)} ${n(w)} ${n(hh)} re`;
     if (o.fill !== undefined) this.cur += `${n(o.fill)} g ${r} f\n`;
     if (o.stroke !== undefined) this.cur += `${n(o.width ?? 0.5)} w ${n(o.stroke)} G ${r} S\n`;
+    return this;
+  }
+  /** Colour as [r, g, b] from 0 to 1, or a hex string like '#1F6B45'. */
+  static rgb(c: string | number[]) {
+    const v = typeof c === 'string' ? [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16) / 255) : c;
+    return v.map((x) => n(x)).join(' ');
+  }
+  /** Text in colour (the plain text() call is grey only). */
+  ctext(x: number, y: number, s: string, color: string, o: { size?: number; bold?: boolean } = {}) {
+    const size = o.size ?? 10;
+    this.cur += `BT /${o.bold ? 'F2' : 'F1'} ${size} Tf ${Pdf.rgb(color)} rg ${n(x)} ${n(this.h - y)} Td (${esc(s)}) Tj ET\n`;
+    return this;
+  }
+  /** A filled and/or stroked shape. pts are [x, y] from the top-left; closed unless open is set. */
+  shape(pts: number[][], o: { fill?: string; stroke?: string; width?: number; open?: boolean } = {}) {
+    let d = pts.map(([x, y], i) => `${n(x)} ${n(this.h - y)} ${i ? 'l' : 'm'}`).join(' ') + (o.open ? '' : ' h');
+    if (o.width) d = `${n(o.width)} w ` + d;
+    if (o.fill) d = `${Pdf.rgb(o.fill)} rg ` + d;
+    if (o.stroke) d = `${Pdf.rgb(o.stroke)} RG ` + d;
+    this.cur += d + (o.fill && o.stroke ? ' B' : o.fill ? ' f' : ' S') + '\n';
+    return this;
+  }
+  /** Rectangle with rounded corners, filled. */
+  rrect(x: number, y: number, w: number, hh: number, r: number, fill: string) {
+    const k = 0.5523 * r, X = x, Y = this.h - y - hh;
+    this.cur += `${Pdf.rgb(fill)} rg ${n(X + r)} ${n(Y)} m ${n(X + w - r)} ${n(Y)} l ${n(X + w - r + k)} ${n(Y)} ${n(X + w)} ${n(Y + r - k)} ${n(X + w)} ${n(Y + r)} c `
+      + `${n(X + w)} ${n(Y + hh - r)} l ${n(X + w)} ${n(Y + hh - r + k)} ${n(X + w - r + k)} ${n(Y + hh)} ${n(X + w - r)} ${n(Y + hh)} c `
+      + `${n(X + r)} ${n(Y + hh)} l ${n(X + r - k)} ${n(Y + hh)} ${n(X)} ${n(Y + hh - r + k)} ${n(X)} ${n(Y + hh - r)} c `
+      + `${n(X)} ${n(Y + r)} l ${n(X)} ${n(Y + r - k)} ${n(X + r - k)} ${n(Y)} ${n(X + r)} ${n(Y)} c f\n`;
+    return this;
+  }
+  /** The StorageX mark (barn with an X-braced door) at x, y, `size` points square. */
+  mark(x: number, y: number, size: number, o: { tile?: string; house?: string; door?: string } = {}) {
+    const s = size / 120, P = (a: number, b: number) => [x + a * s, y + b * s];
+    this.rrect(x, y, size, size, 24 * s, o.tile ?? '#1F6B45');
+    this.shape([P(60, 14), P(104, 46), P(104, 104), P(16, 104), P(16, 46)], { fill: o.house ?? '#FFFFFF' });
+    const door = o.door ?? '#E8B21E', w = 6.5 * s;
+    this.shape([P(36.25, 55.25), P(83.75, 55.25), P(83.75, 100.75), P(36.25, 100.75)], { stroke: door, width: w });
+    this.shape([P(37, 56), P(83, 100)], { stroke: door, width: w, open: true });
+    this.shape([P(83, 56), P(37, 100)], { stroke: door, width: w, open: true });
     return this;
   }
   qr(x: number, y: number, size: number, data: string) {

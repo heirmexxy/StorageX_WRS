@@ -1,42 +1,39 @@
 import type { Ctx } from '../lib/http';
-
-const SHOWN: [string, string, string][] = [
-  ['warehouse_operator', 'Warehouse owners', 'Get your store certified, fill it with depositors, and earn storage fees on stock that lenders accept.'],
-  ['field_partner_network', 'Field agent networks', 'Your agents register and support farmers, and connect them to storage, loans and buyers.'],
-  ['cooperative', 'Co-operatives and associations', 'Store together, sell together in larger lots, and give members access to credit.'],
-  ['buyer', 'Buyers and processors', 'Buy graded, weighed stock from certified warehouses in the lots you need.'],
-  ['insurer', 'Insurers', 'Cover stored produce at sites with counts, photos and records behind every bag.'],
-  ['input_supplier', 'Input suppliers and agro-dealers', 'Sell next season’s inputs to farmers who can pay from their stored produce.'],
-  ['logistics', 'Transporters', 'Carry planned loads at known weights between farms, warehouses and buyers.'],
-  ['inspection', 'Inspectors and collateral managers', 'Grade, inspect and monitor stock across certified warehouses.'],
-  ['payments', 'Banks, fintechs and telcos', 'Handle buyer collections and farmer payouts, including mobile money.'],
-  ['distribution_partner', 'Trading platforms', 'Offer eligible receipts to your users through the StorageX API.'],
-  ['development', 'Development partners and guarantee funds', 'Back farmers with funding or guarantees, and see the results in the data.'],
-  ['government', 'Government and agencies', 'Bring a working receipt system to your state’s farmers and public warehouses.'],
-];
-const CTA: Record<string, string> = { warehouse_operator: 'Partner as a warehouse owner', field_partner_network: 'Partner as a network', cooperative: 'Partner as a co-operative', buyer: 'Partner as a buyer', insurer: 'Partner as an insurer',
-  input_supplier: 'Partner as a supplier', logistics: 'Partner as a transporter', inspection: 'Partner as an inspector', payments: 'Partner on payments', distribution_partner: 'Partner as a platform', development: 'Partner on a programme', government: 'Partner as an agency' };
+import { PARTNER_TYPES, PARTNER_GROUPS } from '../lib/applications';
+import { showcaseDoc } from '../lib/showcase';
+import { config } from '../lib/config';
+import { Icons } from './layout';
+import { ReceiptDocument } from './receipt-doc';
 
 /** Public landing page, written on the StoryBrand frame: the lender is the hero, Kitovu the guide. */
 export function LandingPage({ c }: { c: Ctx }) {
   void c;
+  const receipt = showcaseDoc('SX-OY-ISY-261104-0018')!;
+  const site = config.baseUrl.replace(/\/$/, '');
   return (
     <html lang="en">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>StorageX by Kitovu · Lend against grain you can check</title>
-        <meta name="description" content="StorageX turns produce in certified Nigerian warehouses into receipts lenders can check at any time: the stock, its value, and whether anyone else has a claim on it." />
+        <title>StorageX by Kitovu · Lend against a commodity you can track</title>
+        <meta name="description" content="StorageX turns commodities held in certified Nigerian warehouses into receipts lenders can track at any time: the stock, its value, and whether anyone else has a claim on it." />
+        <meta property="og:title" content="StorageX by Kitovu · Lend against a commodity you can track" />
+        <meta property="og:description" content="Warehouse receipts for commodities in certified Nigerian warehouses, tracked from intake to sale." />
+        <meta property="og:image" content={`${site}/og.png`} />
+        <meta property="og:url" content={site} />
+        <meta name="twitter:card" content="summary_large_image" />
         <link rel="stylesheet" href="/landing.css" />
+        <link rel="stylesheet" href="/receipt.css" />
+        <Icons />
       </head>
       <body className="lp">
         <a className="skip" href="#main">Skip to content</a>
         <header className="lp-top">
-          <a className="lp-brand" href="/">StorageX <span>by Kitovu</span></a>
+          <a className="lp-brand" href="/"><img src="/brand/storagex-logo.svg" alt="StorageX by Kitovu" width="190" height="51" /></a>
           <nav aria-label="Main">
-            <a href="#how">How it works</a>
-            <a href="#partners">Other partners</a>
-            <a href="/sample-receipt">Check a receipt</a>
+            <a href="#watch">How it works</a>
+            <a href="#partners">Partners</a>
+            <a href="/check-receipt">Check a receipt</a>
             <a href="/login">Sign in</a>
             <a className="lp-btn" href="/apply">Apply to partner</a>
           </nav>
@@ -45,32 +42,27 @@ export function LandingPage({ c }: { c: Ctx }) {
         <main id="main">
           <section className="hero">
             <div className="hero-copy">
-              <h1>Lend against grain you can check.</h1>
-              <p className="lead">StorageX turns maize, soybean, sorghum and rice held in certified Nigerian warehouses into receipts. Each one shows, at any moment, whether the bags are still there, what they are worth today, and whether anyone else already has a claim on them.</p>
+              <h1>Lend against a commodity you can track.</h1>
+              <p className="lead">StorageX turns commodities like maize, soybean, sorghum and paddy rice, held in certified Nigerian warehouses, into receipts. Each one shows, at any moment, whether the stock is still there, what it is worth today, and whether anyone else already has a claim on it.</p>
               <div className="ctas">
                 <a className="lp-btn big" href="/apply">Apply to partner</a>
-                <a className="lp-link" href="/sample-receipt">See a sample receipt</a>
+                <a className="lp-link" href="#watch">Watch how it works</a>
               </div>
             </div>
-            <figure className="stackcard" aria-label="Example of a StorageX warehouse receipt">
-              <div className="sc-head">
-                <span className="sc-no">SX-NI-MNA-261107-0001</span>
-                <span className="stamp">Valid</span>
-              </div>
-              <dl>
-                <div><dt>Produce</dt><dd>Maize, grade A</dd></div>
-                <div><dt>Net weight</dt><dd>1,000 kg in 10 bags</dd></div>
-                <div><dt>Warehouse</dt><dd>Minna, Niger State</dd></div>
-                <div><dt>Value today</dt><dd>₦452,500</dd></div>
-              </dl>
-              <ol className="sc-hist">
-                <li>Weighed in, scale photographed</li>
-                <li>Checked by a second person</li>
-                <li>Receipt issued and signed</li>
-                <li>Pledged to one lender only</li>
-              </ol>
-              <figcaption>Illustration. Every real receipt has a public page like this, reached by its QR code.</figcaption>
-            </figure>
+            <div className="hero-receipt">
+              <ReceiptDocument d={receipt} compact />
+            </div>
+          </section>
+
+          <section className="watch" id="watch">
+            <div className="watch-copy">
+              <h2>From the farm gate to payment.</h2>
+              <p>A farmer brings in a harvest. It is weighed, tested and graded, valued, and turned into a receipt. It is stored in a WareGuard-monitored warehouse, lent against, sold when the price is right, and the lender and the farmer are paid. Under two minutes, start to finish.</p>
+            </div>
+            <video className="watch-video" controls preload="none" playsInline poster="/media/storagex-how-it-works.jpg" width="1280" height="720">
+              <source src="/media/storagex-how-it-works.mp4" type="video/mp4" />
+              <a href="/media/storagex-how-it-works.mp4">Download the walkthrough video</a>
+            </video>
           </section>
 
           <section className="problem">
@@ -78,9 +70,9 @@ export function LandingPage({ c }: { c: Ctx }) {
             <div className="three">
               <div><h3>Is the stock really there?</h3><p>A paper receipt says nothing about what happened in the warehouse last week. Bags leave, get re-weighed, get damaged.</p></div>
               <div><h3>Has someone else lent against it?</h3><p>The same bags can back two loans at two banks, and neither bank finds out until both try to collect.</p></div>
-              <div><h3>What is it worth today?</h3><p>Grain prices swing with every harvest. A loan that was safe in October can be under water by January without anyone noticing.</p></div>
+              <div><h3>What is it worth today?</h3><p>Commodity prices swing with every harvest. A loan that was safe in October can be under water by January without anyone noticing.</p></div>
             </div>
-            <p className="why">Meanwhile farmers sell at harvest, when prices are lowest, because nobody will lend against the grain they already own. That is the part we set out to change.</p>
+            <p className="why">Meanwhile farmers sell at harvest, when prices are lowest, because nobody will lend against the harvest they already own. That is the part we set out to change.</p>
           </section>
 
           <section className="guide">
@@ -91,7 +83,8 @@ export function LandingPage({ c }: { c: Ctx }) {
             <ul className="controls">
               <li><b>Weights you can see.</b> Every weighing comes with a photo of the scale display, and an AI check compares the photo with the number typed in.</li>
               <li><b>Two people for every decision that matters.</b> Deliveries, receipts, releases, price entries and loan payouts each need a second person. The database refuses the same person twice.</li>
-              <li><b>One pledge per receipt.</b> A receipt pledged to you cannot be pledged to anyone else, withdrawn or sold until your loan is repaid.</li>
+              <li><b>Pledged to you, and you are paid first.</b> A pledged receipt cannot back anyone else’s loan. The stock leaves the warehouse only through a sale you approve, or after your loan is repaid, and the sale pays you before the farmer.</li>
+              <li><b>Conditions watched around the clock.</b> In warehouses fitted with WareGuard, sensors track the moisture, temperature and humidity around the stock day and night.</li>
               <li><b>A dated, explainable value.</b> Each receipt is valued every morning from approved market prices, under your own haircut and loan-to-value rules.</li>
               <li><b>History that cannot be rewritten.</b> Every change to a receipt is sealed to the one before it, and its signature can be checked offline.</li>
               <li><b>Stock counted against receipts.</b> Physical counts are reconciled with the receipts. If the two disagree, the receipts are marked “under review” for everyone to see.</li>
@@ -120,25 +113,32 @@ export function LandingPage({ c }: { c: Ctx }) {
           </section>
 
           <section className="partners" id="partners">
-            <h2>Not a lender? There is a part for you.</h2>
-            <p className="partners-lead">A receipt system works only when many hands do their part well. These are the partners StorageX is built with.</p>
-            <ul className="plist">
-              {SHOWN.map(([k, t, line]) => (
-                <li key={k}>
-                  <h3>{t}</h3>
-                  <p>{line}</p>
-                  <a href={`/apply?type=${k}`}>{CTA[k] ?? 'Partner with us'}</a>
-                </li>
+            <h2>Every partner has a part.</h2>
+            <p className="partners-lead">A receipt system works only when many hands do their part well. Open your group to see what you bring, what you get, and how to start.</p>
+            <div className="pgroups">
+              {PARTNER_GROUPS.map((g) => (
+                <details key={g.key} className="pgroup">
+                  <summary><span className="pg-name">{g.label}</span><span className="pg-line">{g.line}</span></summary>
+                  <ul className="plist">
+                    {Object.entries(PARTNER_TYPES).filter(([, t]) => t.group === g.key).map(([k, t]) => (
+                      <li key={k}>
+                        <h3>{t.label}</h3>
+                        <p>{t.pitch}</p>
+                        <a href={`/apply?type=${k}`}>{t.cta}</a>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               ))}
-              <li className="farmers">
-                <h3>Farmers</h3>
-                <p>You do not need to sign up here. Ask a Kitovu field partner in your community, or call Kitovu, and they will register you.</p>
-              </li>
-            </ul>
+            </div>
+            <div className="farmers">
+              <h3>Farmers</h3>
+              <p>You do not need to sign up here. Ask a Kitovu field partner in your community, or call Kitovu, and they will register you.</p>
+            </div>
           </section>
 
           <section className="final">
-            <h2>Start with one warehouse and one crop.</h2>
+            <h2>Start with one warehouse and one commodity.</h2>
             <p>Tell us who you are. Our team reviews every application and calls you, usually within five working days.</p>
             <a className="lp-btn big" href="/apply">Apply to partner</a>
           </section>
@@ -146,7 +146,7 @@ export function LandingPage({ c }: { c: Ctx }) {
 
         <footer className="lp-foot">
           <p>StorageX is built and operated by Kitovu Technology Company Limited, Oyo State, Nigeria.</p>
-          <p><a href="#partners">Partners</a> <a href="/sample-receipt">Check a receipt</a> <a href="/apply">Apply to partner</a> <a href="/login">Staff and partner sign in</a></p>
+          <p><a href="#partners">Partners</a> <a href="/check-receipt">Check a receipt</a> <a href="/apply">Apply to partner</a> <a href="/login">Staff and partner sign in</a></p>
         </footer>
       </body>
     </html>

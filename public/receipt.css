@@ -1,0 +1,45 @@
+/* The warehouse receipt document, the same layout as the printed PDF. Shared by the landing page and check pages. */
+.wr { --deep: #154D32; --green: #1F6B45; --maize: #E8B21E; --ink: #17211B; --soft: #5B665F; --rule: #DCDFD8;
+  background: #fff; color: var(--ink); border: 1px solid #C9CEC6; box-shadow: 0 1px 0 #fff inset, 0 18px 40px -18px rgba(23,33,27,.35);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; max-width: 760px; }
+.wr-band { background: var(--deep); border-bottom: 5px solid var(--maize); display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 22px; flex-wrap: wrap; }
+.wr-logo { height: 42px; width: auto; display: block; }
+.wr-title { text-align: right; color: #fff; display: flex; flex-direction: column; }
+.wr-title b { font-size: 17px; }
+.wr-title span { font-size: 12px; color: #CFE0D5; }
+.wr-body { display: grid; grid-template-columns: 1fr 170px; gap: 22px; padding: 20px 22px 6px; }
+.wr-k { display: block; font-size: 12px; color: var(--soft); }
+.wr-no { display: block; font-size: 25px; font-weight: 800; letter-spacing: .01em; font-variant-numeric: tabular-nums; }
+.wr-status { display: inline-block; margin: 6px 0 14px; font-weight: 700; font-size: 13px; padding: 3px 10px; border-radius: 3px; background: #F3E3B0; color: var(--ink); }
+.wr-status.s-issued { background: #D9EBDF; color: var(--deep); }
+.wr-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0 22px; margin: 0; }
+.wr-facts div { border-top: 1px solid var(--rule); padding: 7px 0 8px; }
+.wr-facts dt { font-size: 11.5px; color: var(--soft); }
+.wr-facts dd { margin: 0; font-size: 14px; }
+.wr-facts dd.b { font-weight: 800; font-size: 16px; }
+.wr-qr { align-self: start; border: 1px solid #C9CEC6; padding: 10px; display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: var(--soft) !important; }
+.wr-qr svg { width: 100%; height: auto; display: block; }
+.wr-qr small { font-size: 11px; line-height: 1.35; }
+.wr-terms { padding: 6px 22px 4px; }
+.wr-terms h3 { font-size: 13px; margin: 8px 0 4px; font-family: inherit; letter-spacing: 0; }
+.wr-terms ol { margin: 0; padding-left: 18px; font-size: 11.5px; color: #36413A; }
+.wr-terms li { margin-bottom: 3px; }
+.wr-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; padding: 14px 22px 4px; }
+.wr-sign div { border-top: 1px solid #7C857E; padding-top: 6px; display: flex; flex-direction: column; }
+.wr-sign small { font-size: 11px; color: var(--soft); }
+.wr-sign b { font-size: 13.5px; }
+.wr-sign span { font-size: 12px; color: #36413A; }
+.wr-company { font-size: 10.5px; color: var(--soft); padding: 10px 22px 14px; margin: 0; border-top: 1px solid var(--rule); margin-top: 12px; }
+/* On the landing page the receipt sits beside the headline: same document, smaller type. */
+.wr-compact { font-size: 13px; }
+.wr-compact .wr-no { font-size: 21px; }
+.wr-compact .wr-body { grid-template-columns: 1fr 132px; gap: 16px; }
+.wr-compact .wr-terms ol { font-size: 10.5px; }
+@media (max-width: 640px) {
+  .wr-body, .wr-compact .wr-body { grid-template-columns: 1fr; }
+  .wr-qr { max-width: 180px; }
+  .wr-facts { grid-template-columns: 1fr; }
+  .wr-sign { grid-template-columns: 1fr; gap: 12px; }
+  .wr-title { text-align: left; }
+}
+@media print { .wr { box-shadow: none; border: 0; } }

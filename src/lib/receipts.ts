@@ -11,7 +11,7 @@ import { UserError } from './errors';
 import { notifyFarmer as notify } from './notify';
 import { getSettings } from './settings';
 import { sign, verify, keyId } from './sign';
-import { Pdf } from './pdf';
+import { receiptPdfBuffer } from './receipt-doc';
 import { pageOffset } from './registry';
 import { clean } from './util';
 
@@ -174,10 +174,10 @@ export async function cancelReceipt(a: Actor, no: string, reason: string) {
 }
 
 // ---------- public Receipt Passport ----------
-const PUBLIC_STATUS: Record<string, { label: string; tone: 'ok' | 'warn' | 'bad'; note: string }> = {
+export const PUBLIC_STATUS: Record<string, { label: string; tone: 'ok' | 'warn' | 'bad'; note: string }> = {
   issued: { label: 'Valid', tone: 'ok', note: 'The produce is in the warehouse and the receipt is not pledged or sold.' },
-  pledged: { label: 'Valid — pledged to a lender', tone: 'warn', note: 'The receipt backs a loan. It cannot be sold or pledged again until released.' },
-  financed: { label: 'Valid — financed', tone: 'warn', note: 'The receipt backs a loan. It cannot be sold or pledged again until released.' },
+  pledged: { label: 'Valid — pledged to a lender', tone: 'warn', note: 'The receipt backs a loan and cannot be pledged again. The produce can leave only through a sale the lender approves, or after the loan is repaid; the lender is paid first.' },
+  financed: { label: 'Valid — financed', tone: 'warn', note: 'The receipt backs a loan and cannot be pledged again. The produce can leave only through a sale the lender approves, or after the loan is repaid; the lender is paid first.' },
   sale_approved: { label: 'Being sold', tone: 'warn', note: 'A sale is in progress.' },
   partially_released: { label: 'Partly withdrawn', tone: 'warn', note: 'Some of the produce has left the warehouse.' },
   under_exception: { label: 'Under review', tone: 'bad', note: 'Kitovu is investigating this receipt. Do not rely on it until resolved.' },
@@ -215,33 +215,17 @@ export async function passport(token: string, sig: string | undefined, ip: strin
 export async function receiptPdf(a: Actor, no: string) {
   const r = await receiptByNo(a, no);
   if (!r) throw new UserError('Receipt not found.');
-  const p = new Pdf(), L = 48, R = p.w - 48;
-  p.box(0, 0, p.w, 70, { fill: 0.12 });
-  p.text(L, 32, 'StorageX by Kitovu', { size: 16, bold: true, gray: 1 });
-  p.text(L, 52, 'Electronic warehouse receipt - printed copy', { size: 10, gray: 0.85 });
-  p.text(L, 110, r.receipt_no, { size: 22, bold: true });
-  p.text(L, 132, `Status when printed: ${(PUBLIC_STATUS[r.status]?.label ?? r.status).toUpperCase()}`, { size: 11, bold: true, gray: r.status === 'issued' ? 0 : 0.35 });
-  const rows: [string, string][] = [
-    ['Commodity', `${r.commodity}${r.grade ? `, grade ${r.grade}` : ''}`],
-    ['Net weight', `${Number(r.net_weight_kg).toLocaleString('en-NG', { maximumFractionDigits: 2 })} kg${r.bags ? ` in ${r.bags} bags` : ''}`],
-    ['Moisture at intake', r.moisture_pct ? `${Number(r.moisture_pct)}%` : '-'],
-    ['Warehouse', `${r.wh_name} (${r.wh_code}), ${r.wh_state} State, tier ${r.wh_tier}`],
-    ['Depositor and owner', r.farmer_name ? `${r.farmer_name} (${r.farmer_code})` : '-'],
-    ['Issued', r.issued_at ? new Date(r.issued_at).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', dateStyle: 'medium', timeStyle: 'short' }) + ' WAT' : '-'],
-    ['From delivery', `${r.intake_ref ?? '-'}${r.lots && r.lots > 1 ? `, receipt ${r.lot_no} of ${r.lots}` : ''}`],
-    ['Issued by', r.issued_by_name ?? '-'],
-  ];
-  let y = 170;
-  for (const [k, v] of rows) { p.text(L, y, k, { size: 9, gray: 0.4 }); const end = p.wrap(L + 120, y, v, 190, { size: 11 }); const ny = Math.max(y + 28, end + 10); p.line(L, ny - 19, L + 330, ny - 19, { gray: 0.85 }); y = ny; }
-  const url = verifyUrl(r);
-  p.qr(R - 140, 160, 140, url);
-  p.wrap(R - 140, 320, 'Scan to see the live status. Check it before lending, buying or releasing stock.', 140, { size: 8, gray: 0.3 });
-  y += 10;
-  p.box(L, y, R - L, 92, { stroke: 0.6 });
-  y = p.wrap(L + 12, y + 18, 'This paper is a copy. The receipt is the record held by StorageX at the address below. Its status may have changed since printing: a receipt can be pledged, sold, partly withdrawn or cancelled. Rely only on the live record.', R - L - 24, { size: 9 });
-  p.text(L + 12, y + 6, url.length > 95 ? url.slice(0, 95) + '...' : url, { size: 7, gray: 0.3 });
-  p.text(L, 790, `Signed by StorageX (key ${r.sig_key_id ?? '-'}). Signature: ${(r.signature ?? '').slice(0, 44)}...`, { size: 7, gray: 0.45 });
-  p.text(L, 804, 'Kitovu Technology Company Limited', { size: 7, gray: 0.45 });
+  const extra = await db.get<{ insured: boolean; clerk: string | null }>(`SELECT
+      EXISTS (SELECT 1 FROM insurance_policies p WHERE p.warehouse_id=$1 AND p.status='active' AND (p.cover_from IS NULL OR p.cover_from <= current_date) AND p.cover_to >= current_date) AS insured,
+      (SELECT u.full_name FROM intakes i JOIN users u ON u.id=i.clerk_user_id WHERE i.id=$2) AS clerk`, r.warehouse_id, r.intake_id);
+  const pdf = receiptPdfBuffer({
+    receipt_no: r.receipt_no, status: r.status, status_label: PUBLIC_STATUS[r.status]?.label ?? r.status,
+    commodity: r.commodity, grade: r.grade, net_kg: Number(r.net_weight_kg), bags: r.bags, moisture: r.moisture_pct != null ? Number(r.moisture_pct) : null,
+    warehouse: r.wh_name, wh_code: r.wh_code, wh_state: r.wh_state, wh_tier: r.wh_tier, insured: !!extra?.insured,
+    depositor: r.farmer_name ?? '—', depositor_code: r.farmer_code ?? '—', issued_at: r.issued_at ?? new Date(),
+    intake_ref: r.intake_ref, lot: r.lots && r.lots > 1 ? `receipt ${r.lot_no} of ${r.lots}` : null,
+    issued_by: r.issued_by_name, received_by: extra?.clerk ?? null, url: verifyUrl(r), key_id: r.sig_key_id, signature: r.signature,
+  });
   await audit(actorOf(a), 'receipt.printed', { entity: 'receipt', entityId: r.id, data: { receipt_no: r.receipt_no } });
-  return { pdf: p.toBuffer({ title: r.receipt_no }), name: `${r.receipt_no}.pdf` };
+  return { pdf, name: `${r.receipt_no}.pdf` };
 }

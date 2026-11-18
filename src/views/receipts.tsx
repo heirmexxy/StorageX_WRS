@@ -1,4 +1,6 @@
 import type { Ctx } from '../lib/http';
+import type { ReceiptDoc } from '../lib/receipt-doc';
+import { ReceiptDocument } from './receipt-doc';
 import type { Receipt } from '../lib/receipts';
 import { EVENT_LABEL } from '../lib/receipts';
 import { can } from '../lib/rbac';
@@ -112,11 +114,11 @@ export function ReceiptPage({ c, r, events, chainOk, url, bal, rels, value }: { 
   );
 }
 
-export function PassportPage({ c, p, sample }: { c: Ctx; p: any; sample?: boolean }) {
+export function PassportPage({ c, p, notice, doc }: { c: Ctx; p: any; notice?: string; doc?: ReceiptDoc }) {
   return (
     <Page c={c} title={`Receipt ${p.receipt_no}`} bare wide>
       <section className={`card passport tone-${p.view.tone}`}>
-        {sample && <p className="flash info">This is a sample to show what a receipt page looks like. It is not a real receipt. Real receipts are reached by scanning the QR code on the printed copy or the link texted to the farmer.</p>}
+        {notice && <p className="flash info">{notice}</p>}
         <p className="muted small">StorageX by Kitovu · Receipt Passport</p>
         <h1 className="mono">{p.receipt_no}</h1>
         <p className="status">{p.view.label}</p>
@@ -137,9 +139,10 @@ export function PassportPage({ c, p, sample }: { c: Ctx; p: any; sample?: boolea
         <h2>History</h2>
         <ol className="hist">{p.events.map((e: any, k: number) => <li key={k}>{`${e.label} · ${fmtDate(e.at)}`}</li>)}</ol>
         <p className="small muted">
-          {p.legacy ? 'Imported from the earlier StorageX system. ' : p.signature_ok ? 'Facts signed by StorageX' + (p.key_id ? ` (key ${p.key_id})` : '') + (p.qr_sig === 'match' ? '; the QR signature matches. ' : '. ') : 'Signature check failed. '}
+          {p.showcase ? '' : p.legacy ? 'Imported from the earlier StorageX system. ' : p.signature_ok ? 'Facts signed by StorageX' + (p.key_id ? ` (key ${p.key_id})` : '') + (p.qr_sig === 'match' ? '; the QR signature matches. ' : '. ') : 'Signature check failed. '}
           {p.chain_ok ? 'History intact. ' : ''}{`Checked ${fmtDate(p.checked_at)}.`}
         </p>
+        {doc && <><h2>The receipt</h2><ReceiptDocument d={doc} /><p className="small"><a href={`/check-receipt/${p.receipt_no}.pdf`}>Download the printed copy (PDF)</a></p></>}
         <p className="small muted">This page shows the record held by StorageX right now. Lenders and buyers should check it on the day they rely on it. Questions: contact Kitovu Technology Company Limited.</p>
       </section>
     </Page>

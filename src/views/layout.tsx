@@ -5,6 +5,16 @@ import { can, type Permission } from '../lib/rbac';
 
 export const render = (el: ReactNode) => '<!doctype html>' + renderToString(el as any);
 
+/** Favicons and phone icons, shared by every page. */
+export function Icons() {
+  return (<>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#1F6B45" />
+  </>);
+}
+
 export function Csrf({ c }: { c: Ctx }) { return <input type="hidden" name="_csrf" value={c.csrf} />; }
 
 type NavItem = { href: string; label: string; perm?: Permission; kitovu?: boolean };
@@ -50,10 +60,12 @@ export function Page({ c, title, children, bare, wide }: { c: Ctx; title: string
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{`${title} · StorageX`}</title>
         <link rel="stylesheet" href="/app.css" />
+        <link rel="stylesheet" href="/receipt.css" />
+        <Icons />
       </head>
       <body className={[bare && 'bare', wide && 'wide'].filter(Boolean).join(' ')}>
         <header className="top">
-          <a className="brand" href={s ? '/app' : '/'}>StorageX <span>WRS</span></a>
+          <a className="brand" href={s ? '/app' : '/'}><img src="/brand/storagex-logo.svg" alt="StorageX by Kitovu" width="150" height="40" /></a>
           {s && (
             <nav>
               {NAV.map(({ group, items }) => {

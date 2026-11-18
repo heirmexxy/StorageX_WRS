@@ -9,22 +9,31 @@ import { LoginPage, TwoFactorPage, SetupTwoFactorPage, SetupSmsPage, RecoveryCod
 import { smsAllowed } from '../lib/rbac';
 import { LandingPage } from '../views/landing';
 import { PassportPage } from '../views/receipts';
+import { CheckReceiptPage } from '../views/check-receipt';
+import { showcaseList, showcaseDoc, showcasePassport, CHECK_NOTICE } from '../lib/showcase';
+import { receiptPdfBuffer } from '../lib/receipt-doc';
 
-const SAMPLE = {
-  receipt_no: 'SX-NI-MNA-000000-0000', view: { label: 'Valid — pledged to a lender', tone: 'warn', note: 'The receipt backs a loan. It cannot be sold or pledged again until released.' },
-  commodity: 'Maize', grade: 'A', moisture: '12.5', bags: 10, net_kg: 1000, held_kg: 1000, warehouse: 'Sample Warehouse, Niger State', tier: 'A', insured: true,
-  owner: 'A. D. (SXF-000000)', lot: null, issued_at: new Date('2026-11-02T10:15:00Z'), checked_at: new Date(),
-  events: [{ label: 'Issued', at: new Date('2026-11-02T10:15:00Z') }, { label: 'Pledged to a lender', at: new Date('2026-11-04T09:02:00Z') }, { label: 'Loan paid out', at: new Date('2026-11-04T14:40:00Z') }],
-  chain_ok: true, signature_ok: true, legacy: false, qr_sig: 'match', key_id: 'sample',
-};
 
 const auditActor = (c: Ctx) => ({ userId: c.user?.id ?? null, label: `user:${c.user?.email ?? 'anonymous'}`, ip: c.ip });
 const safeNext = (n: unknown) => (typeof n === 'string' && /^\/(?!\/)[\w\-/?=&.%]*$/.test(n) ? n : '/app');
 
 get('/', 'public', (c) => (c.session?.twofaOk ? c.redirect('/app') : c.html(render(<LandingPage c={c} />))));
 
-// A sample Receipt Passport for the landing page, clearly marked as a sample.
-get('/sample-receipt', 'public', (c) => c.html(render(<PassportPage c={c} p={SAMPLE} sample />)));
+// Checking a receipt: how it works, and the receipts shown on the website.
+get('/sample-receipt', 'public', (c) => c.redirect('/check-receipt', 301));
+get('/check-receipt', 'public', (c) => c.html(render(<CheckReceiptPage c={c} list={showcaseList()} />)));
+get('/check-receipt/:no', 'public', (c) => {
+  const raw = String(c.params.no);
+  if (raw.toLowerCase().endsWith('.pdf')) {
+    const d = showcaseDoc(raw.slice(0, -4));
+    if (!d) throw new HttpError(404, 'No receipt with that number.');
+    const pdf = receiptPdfBuffer(d);
+    return c.download(pdf, 'application/pdf', `${d.receipt_no}.pdf`);
+  }
+  const p = showcasePassport(raw), d = showcaseDoc(raw);
+  if (!p || !d) throw new HttpError(404, 'No receipt with that number. Real receipts are checked by scanning their QR code.');
+  c.html(render(<PassportPage c={c} p={p} doc={d} notice={CHECK_NOTICE} />));
+});
 
 get('/login', 'public', (c) => {
   if (c.session?.twofaOk) return c.redirect('/app');

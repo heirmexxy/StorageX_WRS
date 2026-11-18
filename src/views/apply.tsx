@@ -1,10 +1,9 @@
 import type { Ctx } from '../lib/http';
-import { PARTNER_TYPES } from '../lib/applications';
+import { PARTNER_TYPES, PARTNER_GROUPS } from '../lib/applications';
 import { Page, Csrf, Field, Select, fmtDate } from './layout';
 
 export function ApplyPage({ c, states, error, v = {} }: { c: Ctx; states: { code: string; name: string }[]; error?: string; v?: Record<string, string> }) {
   const chosen = v.type ?? String(c.query.type ?? '');
-  const groups = [...new Set(Object.values(PARTNER_TYPES).map((t) => t.group))];
   return (
     <Page c={c} title="Partner with StorageX" bare wide>
       <section className="card">
@@ -16,22 +15,27 @@ export function ApplyPage({ c, states, error, v = {} }: { c: Ctx; states: { code
           <Csrf c={c} />
           <fieldset className="ptypes">
             <legend>How would you like to partner with us?</legend>
-            {groups.map((g) => (
-              <div key={g} className="ptgroup">
-                <h2>{g}</h2>
-                {Object.entries(PARTNER_TYPES).filter(([, t]) => t.group === g).map(([k, t]) => (
-                  <label key={k} className="ptype">
-                    <input type="radio" name="type" value={k} defaultChecked={chosen === k} required />
-                    <span className="pt-body">
-                      <b>{t.label}</b>
-                      <span><i>You bring:</i>{` ${t.gives}`}</span>
-                      <span><i>You get:</i>{` ${t.gets}`}</span>
-                      <small>{`In the form, tell us: ${t.ask.charAt(0).toLowerCase()}${t.ask.slice(1)}.`}</small>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            ))}
+            <p className="muted small">Open your group, then choose the option that fits you best.</p>
+            {PARTNER_GROUPS.map((g) => {
+              const types = Object.entries(PARTNER_TYPES).filter(([, t]) => t.group === g.key);
+              const open = types.some(([k]) => k === chosen) || (!chosen && c.query.group === g.key);
+              return (
+                <details key={g.key} className="ptgroup" open={open}>
+                  <summary><b>{g.label}</b><span>{g.line}</span></summary>
+                  {types.map(([k, t]) => (
+                    <label key={k} className="ptype">
+                      <input type="radio" name="type" value={k} defaultChecked={chosen === k} />
+                      <span className="pt-body">
+                        <b>{t.label}</b>
+                        <span><i>You bring:</i>{` ${t.gives}`}</span>
+                        <span><i>You get:</i>{` ${t.gets}`}</span>
+                        <small>{`In the form, tell us: ${/^[A-Z][a-z]/.test(t.ask) ? t.ask.charAt(0).toLowerCase() + t.ask.slice(1) : t.ask}.`}</small>
+                      </span>
+                    </label>
+                  ))}
+                </details>
+              );
+            })}
           </fieldset>
           <Field label="Organisation name" name="org_name" value={v.org_name} required />
           <div className="grid">

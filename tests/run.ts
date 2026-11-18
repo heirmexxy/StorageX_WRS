@@ -1243,9 +1243,22 @@ async function main() {
     delete jar.sx_sid;
   });
 
-  await t('landing page and sample receipt are public; signed-in staff go to their home', async () => {
-    const lp = await req('GET', '/'); eq(lp.status, 200); ok(lp.text.includes('Lend against grain you can check') && lp.text.includes('/apply'));
-    const sm = await req('GET', '/sample-receipt'); eq(sm.status, 200); ok(sm.text.includes('not a real receipt'));
+  await t('landing page and receipt check pages are public; signed-in staff go to their home', async () => {
+    const lp = await req('GET', '/'); eq(lp.status, 200);
+    ok(lp.text.includes('Lend against a commodity you can track') && lp.text.includes('commodities like maize') && lp.text.includes('/apply'));
+    ok(lp.text.includes('SX-OY-ISY-261104-0018') && lp.text.includes('<svg') && lp.text.includes('/check-receipt/SX-OY-ISY-261104-0018'), 'the hero shows a receipt with its QR code');
+    ok(!/sample|illustrat/i.test(lp.text), 'the landing page does not call the receipt a sample');
+    ok(lp.text.includes('Financial institutions') && lp.text.includes('Partner as a lender'), 'partners are grouped');
+    ok(!lp.text.includes('withdrawn or sold until your loan is repaid'), 'the old pledge wording is gone');
+    eq((await req('GET', '/sample-receipt')).status, 301);
+    const ck = await req('GET', '/check-receipt/sx-oy-isy-261104-0018'); eq(ck.status, 200);
+    ok(ck.text.includes('no produce is held against it') && ck.text.includes('Terms of this receipt'), 'the check page tells the truth about a showcase receipt');
+    eq((await req('GET', '/check-receipt/SX-XX-NOPE-000000-0000')).status, 404);
+    const pdf = await fetch(`${base}/check-receipt/SX-NA-AWE-261029-0004.pdf`); eq(pdf.status, 200);
+    const buf = Buffer.from(await pdf.arrayBuffer()); ok(buf.subarray(0, 5).toString() === '%PDF-' && buf.toString('latin1').includes('Electronic warehouse receipt'));
+    const v = await fetch(`${base}/media/storagex-how-it-works.mp4`, { headers: { Range: 'bytes=0-99' } }); eq(v.status, 206); eq(v.headers.get('content-range')?.startsWith('bytes 0-99/'), true);
+    eq((await fetch(`${base}/brand/storagex-logo.svg`)).status, 200); eq((await fetch(`${base}/favicon.ico`)).status, 200);
+    const ap = await req('GET', '/apply?type=insurer'); ok(ap.text.includes('<details class="ptgroup" open') && ap.text.includes('NAICOM'));
     await signInAs(ops); eq((await req('GET', '/')).location, '/app'); delete jar.sx_sid;
   });
   await t('USSD gateway posts form fields without a session; farmer messages page is Kitovu-only', async () => {

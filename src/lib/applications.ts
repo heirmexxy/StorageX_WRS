@@ -8,36 +8,44 @@ import { can, type OrgKind } from './rbac';
 import { UserError } from './errors';
 import { normPhone, clean } from './util';
 
-export interface PartnerType { label: string; group: 'Finance and trade' | 'Storage and the field' | 'Services' | 'Programmes and government'; kind: OrgKind; adminRole?: string; gives: string; gets: string; ask: string }
+export type PartnerGroup = 'finance' | 'storage' | 'markets' | 'public';
+/** Partner types are shown in these groups, so people find theirs without reading the whole list. */
+export const PARTNER_GROUPS: { key: PartnerGroup; label: string; line: string }[] = [
+  { key: 'finance', label: 'Financial institutions', line: 'Lenders, insurers, and banks, fintechs and telcos that move the money.' },
+  { key: 'storage', label: 'Storage and field operations', line: 'Warehouses, inspectors, field agent networks and co-operatives.' },
+  { key: 'markets', label: 'Markets and supply chain', line: 'Buyers, trading platforms, input suppliers and transporters.' },
+  { key: 'public', label: 'Development and government', line: 'Development partners, guarantee funds and public agencies.' },
+];
+export interface PartnerType { label: string; group: PartnerGroup; kind: OrgKind; adminRole?: string; gives: string; gets: string; ask: string; pitch: string; cta: string }
 
 /** Who can partner with StorageX. `kind` is the account type created on approval; 'other' partners are handled
  *  by the partnerships team without an account until their integration is ready. */
 export const PARTNER_TYPES: Record<string, PartnerType> = {
-  lender: { label: 'Lender', group: 'Finance and trade', kind: 'lender', adminRole: 'lender_admin',
-    gives: 'Loans to farmers against their stored produce.', gets: 'Verified borrowers and receipts you can check every day, with one pledge per receipt.', ask: 'Licence type (e.g. state MFB, commercial bank) and the states you lend in' },
-  buyer: { label: 'Buyer or processor', group: 'Finance and trade', kind: 'buyer', adminRole: 'buyer_admin',
+  lender: { label: 'Lender', group: 'finance', pitch: 'Lend against stock you can see, value every day and claim first when it is sold.', cta: 'Partner as a lender', kind: 'lender', adminRole: 'lender_admin',
+    gives: 'Loans to farmers against their stored produce.', gets: 'Verified borrowers and receipts you can check every day. A pledged receipt backs only your loan, and you are paid first when the stock is sold.', ask: 'Licence type (e.g. state MFB, commercial bank) and the states you lend in' },
+  buyer: { label: 'Buyer or processor', group: 'markets', pitch: 'Buy graded, weighed stock from certified warehouses in the lots you need.', cta: 'Partner as a buyer', kind: 'buyer', adminRole: 'buyer_admin',
     gives: 'Offers for graded stock and payment through Kitovu.', gets: 'Graded, weighed produce in certified warehouses, bought in larger lots.', ask: 'What you buy, typical volumes and where you take delivery' },
-  distribution_partner: { label: 'Trading platform', group: 'Finance and trade', kind: 'distribution_partner', adminRole: 'partner_admin',
+  distribution_partner: { label: 'Trading platform', group: 'markets', pitch: 'Offer eligible receipts to your users through the StorageX API.', cta: 'Partner as a platform', kind: 'distribution_partner', adminRole: 'partner_admin',
     gives: 'Your users, who can buy or fund receipts through your platform.', gets: 'Access to eligible receipts through the StorageX API.', ask: 'Your platform, your users and how you would offer receipts to them' },
-  insurer: { label: 'Insurer or broker', group: 'Finance and trade', kind: 'insurer', adminRole: 'insurer_viewer',
+  insurer: { label: 'Insurer or broker', group: 'finance', pitch: 'Cover stored produce at sites with counts, photos, sensors and records behind every bag.', cta: 'Partner as an insurer', kind: 'insurer', adminRole: 'insurer_viewer',
     gives: 'Cover for stored produce and warehouses.', gets: 'Sites with counts, photos and stock records that support underwriting and claims.', ask: 'NAICOM licence and the cover you offer for stored produce' },
-  warehouse_operator: { label: 'Warehouse owner or operator', group: 'Storage and the field', kind: 'warehouse_operator', adminRole: 'warehouse_manager',
+  warehouse_operator: { label: 'Warehouse owner or operator', group: 'storage', pitch: 'Get your store certified, fill it with depositors, and earn storage fees on stock lenders accept.', cta: 'Partner as a warehouse owner', kind: 'warehouse_operator', adminRole: 'warehouse_manager',
     gives: 'Storage space, staff and site security.', gets: 'Depositors, storage fees and receipts lenders accept, once your site is certified.', ask: 'Where your warehouse is, its capacity in tonnes and what you store' },
-  field_partner_network: { label: 'Field agent network or extension service', group: 'Storage and the field', kind: 'field_partner_network', adminRole: 'network_admin',
+  field_partner_network: { label: 'Field agent network or extension service', group: 'storage', pitch: 'Your agents register and support farmers, and connect them to storage, loans and buyers.', cta: 'Partner as a network', kind: 'field_partner_network', adminRole: 'network_admin',
     gives: 'Agents who register and support farmers in their communities.', gets: 'A way to connect your farmers to storage, loans and buyers, and fees for the work.', ask: 'How many agents you have and which states and LGAs they cover' },
-  cooperative: { label: 'Farmer co-operative or association', group: 'Storage and the field', kind: 'cooperative', adminRole: 'coop_admin',
+  cooperative: { label: 'Farmer co-operative or association', group: 'storage', pitch: 'Store together, sell together in larger lots, and give members access to credit.', cta: 'Partner as a co-operative', kind: 'cooperative', adminRole: 'coop_admin',
     gives: 'Members who store and sell together.', gets: 'Receipts for members’ produce, group sales and access to credit.', ask: 'Registration number (if any), number of members and main crops' },
-  input_supplier: { label: 'Input supplier or agro-dealer', group: 'Services', kind: 'other',
+  input_supplier: { label: 'Input supplier or agro-dealer', group: 'markets', pitch: 'Sell next season’s inputs to farmers who can pay from their stored produce.', cta: 'Partner as a supplier', kind: 'other',
     gives: 'Seed, fertiliser and crop protection for the next season.', gets: 'Farmers who can pay for inputs from their stored produce or a receipt-backed loan.', ask: 'What inputs you sell and where your outlets are' },
-  logistics: { label: 'Transport and logistics', group: 'Services', kind: 'other',
+  logistics: { label: 'Transport and logistics', group: 'markets', pitch: 'Carry planned loads at known weights between farms, warehouses and buyers.', cta: 'Partner as a transporter', kind: 'other',
     gives: 'Trucks to move produce from farm to warehouse and warehouse to buyer.', gets: 'Planned loads at known weights and pickup points.', ask: 'Fleet size, routes and the states you cover' },
-  inspection: { label: 'Quality inspector or collateral manager', group: 'Services', kind: 'other',
+  inspection: { label: 'Quality inspector or collateral manager', group: 'storage', pitch: 'Grade, inspect and monitor stock across certified warehouses.', cta: 'Partner as an inspector', kind: 'other',
     gives: 'Independent grading, inspection or collateral management.', gets: 'Paid inspection work across certified warehouses.', ask: 'Accreditations, the crops you grade and where you work' },
-  payments: { label: 'Bank, fintech or telco (payments)', group: 'Services', kind: 'other',
+  payments: { label: 'Bank, fintech or telco (payments)', group: 'finance', pitch: 'Handle buyer collections and farmer payouts, including mobile money.', cta: 'Partner on payments', kind: 'other',
     gives: 'Collections from buyers and payouts to farmers, including mobile money.', gets: 'Regular payment volume from sales and loans.', ask: 'The payment services you offer and how they connect' },
-  development: { label: 'Development partner, donor or guarantee fund', group: 'Programmes and government', kind: 'other',
+  development: { label: 'Development partner, donor or guarantee fund', group: 'public', pitch: 'Back farmers with funding or guarantees, and see the results in the data.', cta: 'Partner on a programme', kind: 'other',
     gives: 'Funding, credit guarantees or technical support.', gets: 'Measurable reach: farmers storing, borrowing and selling better, with data to show it.', ask: 'Your programme, the crops and regions it covers, and the support you provide' },
-  government: { label: 'Government or public agency', group: 'Programmes and government', kind: 'other',
+  government: { label: 'Government or public agency', group: 'public', pitch: 'Bring a working receipt system to your state’s farmers and public warehouses.', cta: 'Partner as an agency', kind: 'other',
     gives: 'Policy support, public warehouses or programme reach.', gets: 'A working receipt system for your farmers, with reports you can rely on.', ask: 'Your agency, the programme and the states involved' },
 };
 /** Kept for the admin page: the account types with a first administrator role. */

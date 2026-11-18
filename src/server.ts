@@ -26,6 +26,11 @@ import './routes/messages';
 const CSP = ["default-src 'self'", "img-src 'self' data:", "style-src 'self'", "script-src 'self'", "form-action 'self'", "frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'"].join('; ');
 const STATIC: Record<string, string> = {
   '/app.css': 'text/css; charset=utf-8', '/landing.css': 'text/css; charset=utf-8', '/favicon.ico': 'image/x-icon',
+  '/favicon.svg': 'image/svg+xml', '/receipt.css': 'text/css; charset=utf-8', '/apple-touch-icon.png': 'image/png', '/og.png': 'image/png', '/landing.js': 'application/javascript; charset=utf-8',
+  '/brand/storagex-logo.svg': 'image/svg+xml', '/brand/storagex-logo-reversed.svg': 'image/svg+xml', '/brand/storagex-logo-mono.svg': 'image/svg+xml',
+  '/brand/storagex-logo-stacked.svg': 'image/svg+xml', '/brand/storagex-mark.svg': 'image/svg+xml', '/brand/storagex-mark-mono.svg': 'image/svg+xml',
+  '/brand/storagex-mark-reversed.svg': 'image/svg+xml', '/brand/storagex-favicon.svg': 'image/svg+xml', '/brand/storagex-app-icon.svg': 'image/svg+xml',
+  '/media/storagex-how-it-works.mp4': 'video/mp4', '/media/storagex-how-it-works.jpg': 'image/jpeg',
   // The gate app (Build 3): a static shell that works offline; data comes from /api/intake.
   '/intake/': 'text/html; charset=utf-8', '/intake/app.js': 'application/javascript; charset=utf-8', '/intake/sw.js': 'application/javascript; charset=utf-8',
   '/intake/intake.css': 'text/css; charset=utf-8', '/intake/manifest.webmanifest': 'application/manifest+json', '/intake/icon-192.png': 'image/png', '/intake/icon-512.png': 'image/png',
@@ -67,7 +72,18 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
     const file = path.join(PUBLIC, urlPath.endsWith('/') ? urlPath + 'index.html' : urlPath);
     // Gate app files revalidate every time so phones pick up fixes; the offline worker keeps a copy.
     const cache = urlPath.startsWith('/intake/') ? 'no-cache' : 'public, max-age=3600';
-    if (fs.existsSync(file)) { res.writeHead(200, { 'Content-Type': STATIC[urlPath], 'Cache-Control': cache }); return void fs.createReadStream(file).pipe(res); }
+    if (fs.existsSync(file)) {
+      // Byte ranges: browsers (Safari on iPhones in particular) need them to play and seek video.
+      const size = fs.statSync(file).size, m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
+      if (m && (m[1] || m[2])) {
+        const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2])), end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+        if (start > end || start >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return void res.end(); }
+        res.writeHead(206, { 'Content-Type': STATIC[urlPath], 'Cache-Control': cache, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
+        return void (req.method === 'HEAD' ? res.end() : fs.createReadStream(file, { start, end }).pipe(res));
+      }
+      res.writeHead(200, { 'Content-Type': STATIC[urlPath], 'Cache-Control': cache, 'Accept-Ranges': 'bytes', 'Content-Length': size });
+      return void (req.method === 'HEAD' ? res.end() : fs.createReadStream(file).pipe(res));
+    }
   }
 
   const c = new Ctx(req, res);
