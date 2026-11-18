@@ -212,6 +212,11 @@ else
   sudo -u postgres psql -qc "CREATE ROLE storagex LOGIN PASSWORD '$DB_PASS' CREATEDB"
 fi
 sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='storagex'" | grep -q 1 || sudo -u postgres createdb -O storagex storagex
+# Connect on the port this PostgreSQL really uses. On servers where a container (Dokploy, another app) already holds
+# 5432, Ubuntu's PostgreSQL runs on 5433 or higher, and 127.0.0.1:5432 would reach the container's database instead.
+PGPORT=$(sudo -u postgres psql -tAc "SHOW port" | tr -d '[:space:]')
+PGPORT=${PGPORT:-5432}
+echo "PostgreSQL for StorageX is on port $PGPORT."
 
 say "6/9 Settings (.env) and build"
 if [ ! -f "$APP_DIR/.env" ]; then
@@ -219,7 +224,7 @@ if [ ! -f "$APP_DIR/.env" ]; then
   sed -i "s|^APP_SECRET=.*|APP_SECRET=$(openssl rand -hex 32)|" "$APP_DIR/.env"
 fi
 sed -i "s|^BASE_URL=.*|BASE_URL=https://$HOST|; s|^PORT=.*|PORT=$PORT|; s|^HOST_BIND=.*|HOST_BIND=$BIND|; s|^BACKUP_DIR=.*|BACKUP_DIR=$APP_DIR/data/backups|; s|^UPLOADS_DIR=.*|UPLOADS_DIR=$APP_DIR/data/uploads|" "$APP_DIR/.env"
-sed -i "s|^DATABASE_URL=.*|DATABASE_URL=postgres://storagex:$DB_PASS@127.0.0.1:5432/storagex|" "$APP_DIR/.env"
+sed -i "s|^DATABASE_URL=.*|DATABASE_URL=postgres://storagex:$DB_PASS@127.0.0.1:$PGPORT/storagex|" "$APP_DIR/.env"
 chown "$APP_USER:$APP_USER" "$APP_DIR/.env" && chmod 600 "$APP_DIR/.env"
 sudo -u "$APP_USER" env PATH="$NODE_BIN:/usr/bin:/bin" bash -c "cd $APP_DIR && npm install --no-audit --no-fund && npm run build && npm run migrate && npm run seed"
 sudo -u "$APP_USER" mkdir -p "$APP_DIR/data/backups" "$APP_DIR/data/uploads" && chmod 700 "$APP_DIR/data/uploads"
