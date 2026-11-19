@@ -11,8 +11,8 @@ import { normPhone, clean } from './util';
 export type PartnerGroup = 'finance' | 'storage' | 'markets' | 'public';
 /** Partner types are shown in these groups, so people find theirs without reading the whole list. */
 export const PARTNER_GROUPS: { key: PartnerGroup; label: string; line: string }[] = [
-  { key: 'finance', label: 'Financial institutions', line: 'Lenders, insurers, and banks, fintechs and telcos that move the money.' },
-  { key: 'storage', label: 'Storage and field operations', line: 'Warehouses, inspectors, field agent networks and co-operatives.' },
+  { key: 'finance', label: 'Financial institutions', line: 'Lenders, funding partners, insurers, and banks, fintechs and telcos that move the money.' },
+  { key: 'storage', label: 'Storage and field operations', line: 'Receipt issuers, warehouses, inspectors, field agent networks and co-operatives.' },
   { key: 'markets', label: 'Markets and supply chain', line: 'Buyers, trading platforms, input suppliers and transporters.' },
   { key: 'public', label: 'Development and government', line: 'Development partners, guarantee funds and public agencies.' },
 ];
@@ -23,6 +23,8 @@ export interface PartnerType { label: string; group: PartnerGroup; kind: OrgKind
 export const PARTNER_TYPES: Record<string, PartnerType> = {
   lender: { label: 'Lender', group: 'finance', pitch: 'Lend against stock you can see, value every day and claim first when it is sold.', cta: 'Partner as a lender', kind: 'lender', adminRole: 'lender_admin',
     gives: 'Loans to farmers against their stored produce.', gets: 'Verified borrowers and receipts you can check every day. A pledged receipt backs only your loan, and you are paid first when the stock is sold.', ask: 'Licence type (e.g. state MFB, commercial bank) and the states you lend in' },
+  fintech_funder: { label: 'Fintech or investment app (funding partner)', group: 'finance', pitch: 'Let your users fund loans against warehouse receipts, through the StorageX API.', cta: 'Partner as a funding partner', kind: 'lender', adminRole: 'lender_admin',
+    gives: 'Funding for receipt-backed loans, from your balance sheet or your users, through our API.', gets: 'Loan requests backed by stock you can track, daily values, alerts, repayments and webhooks; each loan can be split among your users by your own reference.', ask: 'Your licence, how your users fund loans today, and the volume you expect' },
   buyer: { label: 'Buyer or processor', group: 'markets', pitch: 'Buy graded, weighed stock from certified warehouses in the lots you need.', cta: 'Partner as a buyer', kind: 'buyer', adminRole: 'buyer_admin',
     gives: 'Offers for graded stock and payment through Kitovu.', gets: 'Graded, weighed produce in certified warehouses, bought in larger lots.', ask: 'What you buy, typical volumes and where you take delivery' },
   distribution_partner: { label: 'Trading platform', group: 'markets', pitch: 'Offer eligible receipts to your users through the StorageX API.', cta: 'Partner as a platform', kind: 'distribution_partner', adminRole: 'partner_admin',
@@ -31,6 +33,8 @@ export const PARTNER_TYPES: Record<string, PartnerType> = {
     gives: 'Cover for stored produce and warehouses.', gets: 'Sites with counts, photos and stock records that support underwriting and claims.', ask: 'NAICOM licence and the cover you offer for stored produce' },
   warehouse_operator: { label: 'Warehouse owner or operator', group: 'storage', pitch: 'Get your store certified, fill it with depositors, and earn storage fees on stock lenders accept.', cta: 'Partner as a warehouse owner', kind: 'warehouse_operator', adminRole: 'warehouse_manager',
     gives: 'Storage space, staff and site security.', gets: 'Depositors, storage fees and receipts lenders accept, once your site is certified.', ask: 'Where your warehouse is, its capacity in tonnes and what you store' },
+  receipt_issuer: { label: 'Receipt issuer (aggregator, processor, co-operative or warehouse company)', group: 'storage', pitch: 'Issue StorageX warehouse receipts to your own farmers, and reach every lender on StorageX.', cta: 'Partner as a receipt issuer', kind: 'issuer', adminRole: 'issuer_admin',
+    gives: 'A warehouse (owned, leased, or bays in a Kitovu warehouse) with WareGuard installed, trained gate staff, insurance and a guarantee deposit.', gets: 'Receipts in your name on StorageX that lenders can check, value and lend against, and a scorecard that earns better terms as your record grows.', ask: 'Your warehouse (owned, leased or shared), its capacity, your farmers and crops' },
   field_partner_network: { label: 'Field agent network or extension service', group: 'storage', pitch: 'Your agents register and support farmers, and connect them to storage, loans and buyers.', cta: 'Partner as a network', kind: 'field_partner_network', adminRole: 'network_admin',
     gives: 'Agents who register and support farmers in their communities.', gets: 'A way to connect your farmers to storage, loans and buyers, and fees for the work.', ask: 'How many agents you have and which states and LGAs they cover' },
   cooperative: { label: 'Farmer co-operative or association', group: 'storage', pitch: 'Store together, sell together in larger lots, and give members access to credit.', cta: 'Partner as a co-operative', kind: 'cooperative', adminRole: 'coop_admin',

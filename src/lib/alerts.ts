@@ -2,6 +2,7 @@
 // conditions from WareGuard. Each alert is raised once per key, so the jobs that raise them can run again safely.
 // Kitovu (org_id NULL) gets a copy of everything a lender gets. Texts go only when switched on in Settings and
 // only to staff who have a phone number on their account.
+import { emit } from './webhooks';
 import { db } from './db';
 import { audit, systemActor } from './audit';
 import { actorOf, type Actor } from './auth';
@@ -34,6 +35,7 @@ export async function raise(orgId: string | null, a: { kind: AlertKind; level: L
         org, a.kind, a.level, a.title, a.body, a.link ?? null, a.key);
       if (!id) continue;
       fresh = true;
+      if (org) await emit(org, 'alert.created', { id, kind: a.kind, level: a.level, title: a.title, body: a.body, link: a.link ?? null }, a.key);
       if (a.level !== 'info') await textStaff(org, `StorageX: ${a.title}. ${a.body}`.slice(0, 300));
     }
     return fresh;

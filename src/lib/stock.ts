@@ -19,8 +19,8 @@ function needStock(a: Actor) { if (!can(a.membership, 'stock.manage')) throw new
 
 async function warehouseFor(a: Actor, whId: string) {
   needStock(a);
-  const w = await db.get<{ id: string; code: string; name: string; operator_org_id: string; status: string }>('SELECT id, code, name, operator_org_id, status FROM warehouses WHERE id=$1', whId);
-  if (!w || (!isKitovu(a) && w.operator_org_id !== a.membership!.org_id)) throw new UserError('Warehouse not found.');
+  const w = await db.get<{ id: string; code: string; name: string; operator_org_id: string; status: string }>('SELECT id, code, name, operator_org_id, status FROM warehouses WHERE id=$1 AND wh_access(id, $2)', whId, isKitovu(a) ? null : a.membership!.org_id);
+  if (!w) throw new UserError('Warehouse not found.');
   return w;
 }
 export const warehouseByCode = async (a: Actor, code: string) => {
@@ -52,7 +52,7 @@ export async function overview(a: Actor) {
        (SELECT max(counted_at) FROM stock_counts c WHERE c.warehouse_id=w.id) AS last_count,
        (SELECT count(*)::int FROM stock_adjustments x WHERE x.warehouse_id=w.id AND x.status='proposed') AS pending_adj,
        (SELECT count(*)::int FROM releases x JOIN receipts r ON r.id=x.receipt_id WHERE r.warehouse_id=w.id AND x.status='ordered') AS pending_rel
-     FROM warehouses w WHERE w.status <> 'closed' AND ($1::uuid IS NULL OR w.operator_org_id=$1) ORDER BY w.name`,
+     FROM warehouses w WHERE w.status <> 'closed' AND wh_access(w.id, $1) ORDER BY w.name`,
     isKitovu(a) ? null : a.membership!.org_id, LIVE);
 }
 
@@ -220,9 +220,10 @@ export const receiptBalance = (receiptId: string) => db.get<{ remaining_kg: numb
   'SELECT remaining_kg::float, released_kg::float FROM receipt_balances WHERE receipt_id=$1', receiptId);
 
 export async function orderRelease(a: Actor, receiptNo: string, i: { kg?: string; reason?: string; collector_name?: string; collector_phone?: string; note?: string }) {
-  if (!isKitovu(a) || !can(a.membership, 'receipts.issue')) throw new UserError('Only Kitovu staff with receipt rights order releases.');
-  const r = await db.get<{ id: string; receipt_no: string; status: string; warehouse_id: string }>('SELECT id, receipt_no, status::text, warehouse_id FROM receipts WHERE receipt_no=upper($1)', clean(receiptNo, 40));
-  if (!r) throw new UserError('Receipt not found.');
+  const issuer = a.membership?.org_kind === 'issuer';
+  if (!(isKitovu(a) || issuer) || !can(a.membership, 'receipts.issue')) throw new UserError('Only Kitovu staff or the issuer’s receipt officers order releases.');
+  const r = await db.get<{ id: string; receipt_no: string; status: string; warehouse_id: string; issuer_org_id: string | null }>('SELECT id, receipt_no, status::text, warehouse_id, issuer_org_id FROM receipts WHERE receipt_no=upper($1)', clean(receiptNo, 40));
+  if (!r || (issuer && r.issuer_org_id !== a.membership!.org_id)) throw new UserError('Receipt not found.');
   if (!['issued', 'partially_released'].includes(r.status)) throw new UserError(`Stock cannot be released against a receipt that is ${r.status.replace(/_/g, ' ')}.`);
   const reason = String(i.reason);
   if (!['owner_withdrawal', 'sale_delivery', 'other'].includes(reason)) throw new UserError('Choose why the stock is leaving.');
@@ -247,10 +248,10 @@ export async function releaseByRef(a: Actor, ref: string) {
   needStock(a);
   const x = await db.get<any>(
     `SELECT x.*, x.kg_ordered::float AS ordered, x.kg_loaded::float AS loaded, r.receipt_no, r.id AS rid, r.status::text AS receipt_status, r.warehouse_id, r.commodity_code,
-       c.name AS commodity, w.name AS wh_name, w.operator_org_id, f.id AS farmer_id, f.full_name AS owner, f.code AS owner_code, f.phone_e164, f.phone_verified_at, u.full_name AS orderer, lu.full_name AS loader
+       c.name AS commodity, w.name AS wh_name, w.operator_org_id, wh_access(w.id, $2) AS reach, f.id AS farmer_id, f.full_name AS owner, f.code AS owner_code, f.phone_e164, f.phone_verified_at, u.full_name AS orderer, lu.full_name AS loader
      FROM releases x JOIN receipts r ON r.id=x.receipt_id JOIN commodities c ON c.code=r.commodity_code JOIN warehouses w ON w.id=r.warehouse_id
-       LEFT JOIN farmers f ON f.id=r.owner_farmer_id JOIN users u ON u.id=x.ordered_by LEFT JOIN users lu ON lu.id=x.loaded_by WHERE x.ref=upper($1)`, clean(ref, 30));
-  if (!x || (!isKitovu(a) && x.operator_org_id !== a.membership!.org_id)) return undefined;
+       LEFT JOIN farmers f ON f.id=r.owner_farmer_id JOIN users u ON u.id=x.ordered_by LEFT JOIN users lu ON lu.id=x.loaded_by WHERE x.ref=upper($1)`, clean(ref, 30), isKitovu(a) ? null : a.membership!.org_id);
+  if (!x || !x.reach) return undefined;
   return x;
 }
 

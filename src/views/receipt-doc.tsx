@@ -8,7 +8,7 @@ export function ReceiptDocument({ d, compact }: { d: ReceiptDoc; compact?: boole
     <article className={`wr${compact ? ' wr-compact' : ''}`} aria-label={`Warehouse receipt ${d.receipt_no}`}>
       <header className="wr-band">
         <img src={asset('/brand/storagex-logo-reversed.svg')} alt="StorageX by Kitovu" className="wr-logo" width="170" height="45" />
-        <div className="wr-title"><b>Electronic warehouse receipt</b><span>Printed copy of the live record</span></div>
+        <div className="wr-title"><b>Electronic warehouse receipt</b><span>{d.issuer ? `Issued by ${d.issuer} on StorageX` : 'Printed copy of the live record'}</span></div>
       </header>
       <div className="wr-body">
         <div className="wr-main">
@@ -33,7 +33,7 @@ export function ReceiptDocument({ d, compact }: { d: ReceiptDoc; compact?: boole
       </section>
       <footer className="wr-sign">
         <div><small>For the warehouse operator</small><b>{d.warehouse}</b><span>{d.received_by ? `Received and weighed by ${d.received_by}` : 'Received and weighed at intake'}</span></div>
-        <div><small>For Kitovu Technology Company Limited</small><b>{d.issued_by ? `Issued by ${d.issued_by}` : 'Issued by StorageX'}</b><span>{d.signature ? `Digitally signed${d.key_id ? ` · key ${d.key_id}` : ''}` : `Issued through StorageX on ${whenText(d.issued_at).replace(/,? at \d{2}:\d{2} WAT$/, '')}`}</span></div>
+        <div><small>{`For ${d.issuer ?? 'Kitovu Technology Company Limited'}`}</small><b>{d.issued_by ? `Issued by ${d.issued_by}` : 'Issued by StorageX'}</b><span>{d.signature ? `Digitally signed${d.key_id ? ` · key ${d.key_id}` : ''}` : `Issued through StorageX on ${whenText(d.issued_at).replace(/,? at \d{2}:\d{2} WAT$/, '')}`}</span></div>
       </footer>
       <p className="wr-company">{COMPANY}</p>
     </article>

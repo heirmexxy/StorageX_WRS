@@ -18,13 +18,14 @@ export function Icons() {
 
 export function Csrf({ c }: { c: Ctx }) { return <input type="hidden" name="_csrf" value={c.csrf} />; }
 
-type NavItem = { href: string; label: string; perm?: Permission; kitovu?: boolean };
+type NavItem = { href: string; label: string; perm?: Permission; kitovu?: boolean; kinds?: string[] };
 // Grouped so the menu stays on one line; a group with one item for this person shows as a plain link.
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Home', items: [
     { href: '/app', label: 'Home' },
     { href: '/alerts', label: 'Alerts', perm: 'warehouses.view' },
     { href: '/dashboard', label: 'Business dashboard', perm: 'reports.view', kitovu: true },
+    { href: '/issuer', label: 'Issuer status', perm: 'receipts.issue', kinds: ['issuer'] },
   ] },
   { group: 'Farmers', items: [
     { href: '/farmers', label: 'Farmers', perm: 'farmers.view' },
@@ -43,6 +44,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/tower', label: 'Control tower', perm: 'finance.view' },
     { href: '/stock-watch', label: 'Stock watch', perm: 'warehouses.view' },
     { href: '/offers', label: 'Buyer offers', perm: 'finance.view' },
+    { href: '/issuers', label: 'Receipt issuers', perm: 'finance.view', kinds: ['kitovu', 'lender'] },
+    { href: '/developers/keys', label: 'API keys', perm: 'receipts.view', kinds: ['kitovu', 'lender', 'issuer'] },
     { href: '/loans', label: 'Loans', perm: 'finance.view' },
     { href: '/prices', label: 'Prices', perm: 'finance.view' },
     { href: '/sales', label: 'Sales', perm: 'receipts.issue', kitovu: true },
@@ -54,6 +57,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/admin/orgs', label: 'Organisations', perm: 'orgs.manage' },
     { href: '/admin/audit', label: 'Audit log', perm: 'audit.view' },
     { href: '/admin/settings', label: 'Settings', perm: 'settings.manage' },
+    { href: '/developers', label: 'API documentation' },
   ] },
   { group: 'My account', items: [{ href: '/account', label: 'My account' }] },
 ];
@@ -76,7 +80,7 @@ export function Page({ c, title, children, bare, wide }: { c: Ctx; title: string
           {s && (
             <nav>
               {NAV.map(({ group, items }) => {
-                const mine = items.filter((n) => (!n.perm || can(s.active, n.perm)) && (!n.kitovu || s.active?.org_kind === 'kitovu'));
+                const mine = items.filter((n) => (!n.perm || can(s.active, n.perm)) && (!n.kitovu || s.active?.org_kind === 'kitovu') && (!n.kinds || n.kinds.includes(String(s.active?.org_kind))));
                 const on = (n: NavItem) => c.path === n.href.split('?')[0] || (n.href !== '/app' && c.path.startsWith(n.href.split('?')[0] + '/'));
                 if (!mine.length) return null;
                 if (mine.length === 1) return <a key={group} href={mine[0].href} className={on(mine[0]) ? 'on' : ''}>{mine[0].label}</a>;

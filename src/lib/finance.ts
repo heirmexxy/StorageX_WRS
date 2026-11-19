@@ -4,11 +4,13 @@
 //   (never the person who prepared it); approval pledges the receipts (one active lien per receipt, enforced by the
 //   database); a different lender person records the disbursement; repayments clear the loan and release the liens.
 // Interest is simple, daily, on principal outstanding. Repayments go to fees, then interest, then principal.
+import { emit } from './webhooks';
 import { db, tx } from './db';
 import { audit } from './audit';
 import { actorOf, type Actor } from './auth';
 import { can } from './rbac';
 import { UserError } from './errors';
+import { lenderTermsFor, charge } from './issuers';
 import { toKobo, fmtNGN, bpOf } from './money';
 import { notifyFarmer as notify } from './notify';
 import { getSettings } from './settings';
@@ -51,17 +53,28 @@ async function batch(id: string) {
   return db.get<any>(`SELECT b.*, p.name AS product, p.commodity_codes, p.min_kobo, p.max_kobo, p.min_kyc_level, p.interest_bp_month, p.fee_bp, p.tenor_days, o.name AS lender, o.code AS lender_code, o.kind AS lender_kind
     FROM loan_batches b JOIN loan_products p ON p.id=b.product_id JOIN organisations o ON o.id=b.lender_org_id WHERE b.id=$1`, id);
 }
-function canSeeBatch(a: Actor, b: any) { return isKitovu(a) || b.lender_org_id === a.membership?.org_id; }
+function canSeeBatch(a: Actor, b: any) { return isKitovu(a) || b.lender_org_id === a.membership?.org_id || (!!b.prepared_by_org_id && b.prepared_by_org_id === a.membership?.org_id); }
+/** Kitovu operations prepare loan requests for any farmer; a certified issuer prepares them for its own receipts. */
+const preparer = (a: Actor) => {
+  if (!can(a.membership, 'receipts.issue') || !(isKitovu(a) || a.membership?.org_kind === 'issuer')) throw new UserError('Kitovu operations, or a certified issuer for its own receipts, prepare loan requests.');
+  return isKitovu(a) ? null : a.membership!.org_id;
+};
+const ownBatch = (a: Actor, b: any, org: string | null) => { if (org && b.prepared_by_org_id !== org) throw new UserError('Loan request not found.'); };
 
 export async function createBatch(a: Actor, productId: string) {
-  if (!isKitovu(a) || !can(a.membership, 'receipts.issue')) throw new UserError('Kitovu operations prepare loan requests.');
+  const org = preparer(a);
   const p = await db.get<{ id: string; org_id: string; active: boolean }>('SELECT id, org_id, active FROM loan_products WHERE id=$1', productId);
   if (!p?.active) throw new UserError('Choose an active loan product.');
+  if (org) {
+    const st = await db.val<string>(`SELECT status FROM issuer_profiles WHERE org_id=$1`, org);
+    if (st !== 'certified') throw new UserError('Your company must be a certified issuer to send loan requests.');
+    if (!(await db.val('SELECT 1 FROM lender_issuer_terms WHERE lender_org_id=$1 AND issuer_org_id=$2 AND accepted', p.org_id, org))) throw new UserError('This lender does not accept your receipts yet.');
+  }
   return tx(async () => {
     const day = ymd(new Date()).slice(2).replace(/-/g, '');
     await db.run('SELECT pg_advisory_xact_lock(hashtext($1))', 'lb:' + day);
     const ref = `LB-${day}-${String(Number(await db.val(`SELECT count(*) FROM loan_batches WHERE ref LIKE $1`, `LB-${day}-%`)) + 1).padStart(3, '0')}`;
-    const id = (await db.val<string>(`INSERT INTO loan_batches (ref, lender_org_id, product_id, created_by) VALUES ($1,$2,$3,$4) RETURNING id`, ref, p.org_id, p.id, a.user.id))!;
+    const id = (await db.val<string>(`INSERT INTO loan_batches (ref, lender_org_id, product_id, created_by, prepared_by_org_id) VALUES ($1,$2,$3,$4,$5) RETURNING id`, ref, p.org_id, p.id, a.user.id, org))!;
     await audit(actorOf(a), 'loan.batch_created', { orgId: p.org_id, entity: 'loan_batch', entityId: id, data: { ref } });
     return { id, ref };
   });
@@ -76,7 +89,10 @@ export async function capacity(lenderOrgId: string, receiptIds: string[]) {
     const ref = await referencePrice(r.commodity_code, r.state_code);
     const v = compute(held, ref, await policyFor(lenderOrgId, r.commodity_code));
     if (v.market === null) { missing.push(r.receipt_no); continue; }
-    market += v.market; maxLoan += v.maxLoan!;
+    // Receipts from another issuer count only if this lender accepts that issuer, and at most its cap.
+    const t = await lenderTermsFor(lenderOrgId, id);
+    const allowed = !t.ok ? 0 : t.cap_bp === null ? v.maxLoan! : Math.min(v.maxLoan!, Math.floor(v.market * t.cap_bp / 10_000));
+    market += v.market; maxLoan += allowed;
   }
   return { market, maxLoan, missing };
 }
@@ -91,6 +107,9 @@ async function eligibleReceipts(b: any, farmerId: string, receiptNos: string[], 
     if (!FREE.includes(r.status)) throw new UserError(`Receipt ${r.receipt_no} is ${r.status.replace(/_/g, ' ')} and cannot be pledged.`);
     if (b.commodity_codes.length && !b.commodity_codes.includes(r.commodity_code)) throw new UserError(`This product does not lend against ${r.commodity_code}.`);
     if (await db.val('SELECT 1 FROM liens WHERE receipt_id=$1 AND released_at IS NULL', r.id)) throw new UserError(`Receipt ${r.receipt_no} is already pledged.`);
+    if (b.prepared_by_org_id && (await db.val<string>('SELECT issuer_org_id FROM receipts WHERE id=$1', r.id)) !== b.prepared_by_org_id) throw new UserError(`Receipt ${r.receipt_no} was not issued by your company.`);
+    const t = await lenderTermsFor(b.lender_org_id, r.id);
+    if (!t.ok) throw new UserError(`${b.lender} does not accept receipts issued by ${t.issuer}.`);
     const other = await db.val<string>(`SELECT b.ref FROM loan_lines l JOIN loan_batches b ON b.id=l.batch_id WHERE $1 = ANY(l.receipt_ids) AND l.status='pending' AND b.status IN ('draft','submitted') AND ($2::uuid IS NULL OR l.id <> $2)`, r.id, exceptLine ?? null);
     if (other) throw new UserError(`Receipt ${r.receipt_no} is already in loan request ${other}.`);
     ids.push(r.id);
@@ -100,9 +119,10 @@ async function eligibleReceipts(b: any, farmerId: string, receiptNos: string[], 
 }
 
 export async function addLine(a: Actor, batchId: string, i: { farmer?: string; receipts?: string; amount?: string }) {
-  if (!isKitovu(a) || !can(a.membership, 'receipts.issue')) throw new UserError('Kitovu operations prepare loan requests.');
+  const org = preparer(a);
   const b = await batch(batchId);
   if (!b || b.status !== 'draft') throw new UserError('Lines can be added only to a draft batch.');
+  ownBatch(a, b, org);
   const f = await db.get<{ id: string; code: string; kyc_level: number; status: string }>('SELECT id, code, kyc_level, status FROM farmers WHERE code=upper($1)', clean(i.farmer, 12));
   if (!f || f.status !== 'active') throw new UserError('Farmer not found.');
   if (f.kyc_level < 1) throw new UserError('The farmer’s identity must be checked (level 1) before a loan request.');
@@ -120,15 +140,16 @@ export async function addLine(a: Actor, batchId: string, i: { farmer?: string; r
 }
 
 export async function removeLine(a: Actor, lineId: string) {
-  if (!isKitovu(a) || !can(a.membership, 'receipts.issue')) throw new UserError('Kitovu operations prepare loan requests.');
-  const n = await db.run(`DELETE FROM loan_lines l USING loan_batches b WHERE l.id=$1 AND b.id=l.batch_id AND b.status='draft'`, lineId);
+  const org = preparer(a);
+  const n = await db.run(`DELETE FROM loan_lines l USING loan_batches b WHERE l.id=$1 AND b.id=l.batch_id AND b.status='draft' AND ($2::uuid IS NULL OR b.prepared_by_org_id=$2)`, lineId, org);
   if (!n) throw new UserError('Only lines in a draft batch can be removed.');
 }
 
 export async function submitBatch(a: Actor, batchId: string, review: (lineId: string) => Promise<unknown>) {
-  if (!isKitovu(a) || !can(a.membership, 'receipts.issue')) throw new UserError('Kitovu operations submit loan requests.');
+  const org = preparer(a);
   const b = await batch(batchId);
   if (!b || b.status !== 'draft') throw new UserError('Only a draft batch can be submitted.');
+  ownBatch(a, b, org);
   const lines = await db.all<{ id: string; receipt_ids: string[]; farmer_id: string; requested_kobo: string }>('SELECT id, receipt_ids, farmer_id, requested_kobo FROM loan_lines WHERE batch_id=$1', b.id);
   if (!lines.length) throw new UserError('Add at least one farmer to the batch.');
   for (const l of lines) {   // values can move between drafting and submitting
@@ -138,6 +159,7 @@ export async function submitBatch(a: Actor, batchId: string, review: (lineId: st
   }
   await db.run(`UPDATE loan_batches SET status='submitted', submitted_by=$2, submitted_at=now() WHERE id=$1`, b.id, a.user.id);
   for (const l of lines) await review(l.id);
+  for (const l of lines) await emit(b.lender_org_id, 'loan_request.created', { request_id: l.id, batch: b.ref, product: b.product, requested_kobo: Number(l.requested_kobo) }, l.id);
   await audit(actorOf(a), 'loan.batch_submitted', { orgId: b.lender_org_id, entity: 'loan_batch', entityId: b.id, data: { ref: b.ref, lines: lines.length } });
 }
 
@@ -148,12 +170,12 @@ export async function batchesFor(a: Actor) {
        (SELECT COALESCE(sum(requested_kobo),0)::float FROM loan_lines l WHERE l.batch_id=b.id AND l.status <> 'removed') AS requested,
        (SELECT count(*)::int FROM loan_lines l WHERE l.batch_id=b.id AND l.status='pending') AS pending
      FROM loan_batches b JOIN organisations o ON o.id=b.lender_org_id JOIN loan_products p ON p.id=b.product_id
-     WHERE ($1::uuid IS NULL OR (b.lender_org_id=$1 AND b.status <> 'draft')) ORDER BY b.created_at DESC LIMIT 100`, isKitovu(a) ? null : a.membership!.org_id);
+     WHERE ($1::uuid IS NULL OR (b.lender_org_id=$1 AND b.status <> 'draft') OR b.prepared_by_org_id=$1) ORDER BY b.created_at DESC LIMIT 100`, isKitovu(a) ? null : a.membership!.org_id);
 }
 export async function batchView(a: Actor, ref: string) {
   const id = await db.val<string>('SELECT id FROM loan_batches WHERE ref=upper($1)', clean(ref, 20));
   const b = id ? await batch(id) : undefined;
-  if (!b || !canSeeBatch(a, b) || (!isKitovu(a) && b.status === 'draft')) return undefined;
+  if (!b || !canSeeBatch(a, b) || (!isKitovu(a) && b.status === 'draft' && b.prepared_by_org_id !== a.membership?.org_id)) return undefined;
   b.lines = await db.all<any>(
     `SELECT l.*, l.requested_kobo::float AS requested, l.max_loan_kobo::float AS max_loan, l.market_value_kobo::float AS market, l.approved_kobo::float AS approved,
        f.code AS farmer_code, f.full_name AS farmer_name, f.kyc_level, f.community, u.full_name AS decider, ln.loan_no,
@@ -208,11 +230,13 @@ export async function decideLine(a: Actor, lineId: string, approve: boolean, i: 
     }
     if (!(await db.val(`SELECT 1 FROM loan_lines WHERE batch_id=$1 AND status='pending'`, l.bid))) await db.run(`UPDATE loan_batches SET status='decided' WHERE id=$1`, l.bid);
     await audit(actorOf(a), approve ? 'loan.approved' : 'loan.rejected', { orgId: l.lender_org_id, entity: 'loan_line', entityId: l.id, data: { note: note || null } });
+    const lno = await db.val<string>('SELECT ln.loan_no FROM loan_lines l JOIN loans ln ON ln.id=l.loan_id WHERE l.id=$1', l.id);
+    await emit(l.lender_org_id, approve ? 'loan.approved' : 'loan.rejected', { request_id: l.id, loan_no: lno ?? null, note: note || null }, l.id);
   });
 }
 
 async function loanRow(loanNo: string) {
-  return db.get<any>(`SELECT ln.*, ln.principal_kobo::float AS principal, o.name AS lender, o.code AS lender_code, p.name AS product, p.min_kyc_level, p.margin_call_ltv_bp, p.liquidation_ltv_bp,
+  return db.get<any>(`SELECT ln.*, ln.principal_kobo::float AS principal, o.name AS lender, o.code AS lender_code, o.kind::text AS lender_kind, p.name AS product, p.min_kyc_level, p.margin_call_ltv_bp, p.liquidation_ltv_bp,
       f.code AS farmer_code, f.full_name AS farmer_name, f.kyc_level, f.phone_e164, f.phone_verified_at, ua.full_name AS approver, ud.full_name AS disburser
     FROM loans ln JOIN organisations o ON o.id=ln.lender_org_id JOIN loan_products p ON p.id=ln.product_id JOIN farmers f ON f.id=ln.farmer_id
       JOIN users ua ON ua.id=ln.approved_by LEFT JOIN users ud ON ud.id=ln.disbursed_by WHERE ln.loan_no=upper($1)`, clean(loanNo, 30));
@@ -245,6 +269,9 @@ export async function disburse(a: Actor, loanNo: string, i: { reference?: string
       await db.run(`INSERT INTO receipt_events (receipt_id, event_type, occurred_at, actor, data) VALUES ($1,'financed',now(),$2,$3)`, r.receipt_id, `user:${a.user.id}`, JSON.stringify({ loan_no: ln.loan_no, lender: ln.lender }));
     }
     await audit(actorOf(a), 'loan.disbursed', { orgId: ln.lender_org_id, entity: 'loan', entityId: ln.id, data: { loan_no: ln.loan_no, kobo: ln.principal, due } });
+    await emit(ln.lender_org_id, 'loan.disbursed', { loan_no: ln.loan_no, principal_kobo: ln.principal, on: day, due_on: due, reference: ref }, ln.loan_no);
+    const obp = (await getSettings())['fees.origination_bp'];
+    if (ln.lender_kind !== 'kitovu') await charge(ln.lender_org_id, 'origination', Math.round(ln.principal * obp / 10_000), ln.loan_no, { bp: obp, principal: ln.principal }, a.user.id);
   });
   await notify(ln.farmer_id, 'loan_disbursed', ln.loan_no, { lender: ln.lender, loan: ln.loan_no, amount: fmtNGN(ln.principal, { decimals: false }), due });
 }
@@ -322,6 +349,8 @@ export async function repay(a: Actor, loanNo: string, i: { amount?: string; on?:
       await releaseLiens(ln.id, a.user.id, `loan ${ln.loan_no} repaid`);
     }
     await audit(actorOf(a), `loan.${kind}`, { orgId: ln.lender_org_id, entity: 'loan', entityId: ln.id, data: { kobo: amount, closed } });
+    if (kind === 'repayment') await emit(ln.lender_org_id, 'loan.repayment', { loan_no: ln.loan_no, amount_kobo: Math.min(amount, before.outstanding), on: ymd(on), reference: ref, outstanding_kobo: after.outstanding }, `${ln.loan_no}:${ref}:${ymd(on)}`);
+    if (closed) await emit(ln.lender_org_id, 'loan.repaid', { loan_no: ln.loan_no }, ln.loan_no);
     return { closed, outstanding: after.outstanding };
   });
   if (kind === 'repayment') await notify(ln.farmer_id, res.closed ? 'loan_closed' : 'loan_repayment', `${ln.loan_no}:${ref}`,

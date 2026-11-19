@@ -19,12 +19,12 @@ export interface User {
   factor: 'totp' | 'sms' | null;
 }
 export interface Session { id: string; user: User; twofaOk: boolean; memberships: Membership[]; active: Membership | null; expiresAt: Date }
-export interface Actor { user: User; membership: Membership | null; ip?: string | null }
+export interface Actor { user: User; membership: Membership | null; ip?: string | null; /** set for API calls: which key */ via?: string }
 
 const MAX_FAILS = 5;
 const LOCK_MINUTES = 15;
 const DUMMY_HASH = hashPassword('timing-equaliser-not-a-real-password');
-export const actorOf = (a: Actor): AuditActor => ({ userId: a.user.id, label: `user:${a.user.email}`, ip: a.ip });
+export const actorOf = (a: Actor): AuditActor => ({ userId: a.user.id, label: `user:${a.user.email}${a.via ? ` via ${a.via}` : ''}`, ip: a.ip });
 
 // ---------- rate limits ----------
 /** Counts a hit on `key`; true while the count in the current window is within `max`. */

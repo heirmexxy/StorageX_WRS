@@ -94,6 +94,18 @@ async function main() {
       console.log(`price watch: ${w.loans} loans checked, ${w.raised} new alerts`);
       break;
     }
+    case 'webhooks': {
+      const { deliverDue } = await import('./lib/webhooks');
+      const r = await deliverDue();
+      if (r.due) console.log(`${new Date().toISOString()} webhooks: ${r.ok} delivered, ${r.failed} to retry`);
+      break;
+    }
+    case 'wareguard-sweep': {
+      const { sweepOffline } = await import('./lib/wareguard');
+      const n = await sweepOffline();
+      if (n) console.log(`${new Date().toISOString()} WareGuard: ${n} device(s) quiet`);
+      break;
+    }
     case 'purge-files': {
       console.log(`removed ${await purgeExpiredFiles()} expired file(s)`);
       break;

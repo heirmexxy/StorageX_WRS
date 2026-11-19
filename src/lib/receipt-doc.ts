@@ -16,6 +16,8 @@ export interface ReceiptDoc {
   value?: { kobo_per_kg: number; kobo: number; basis: string } | null;
   /** The policy that covered the warehouse when the receipt was issued. */
   insurance?: { insurer: string; policy_no?: string | null; cover_to?: Date | string | null } | null;
+  /** A company other than Kitovu that issued the receipt on StorageX. */
+  issuer?: string | null;
 }
 
 export const COMPANY = 'Kitovu Technology Company Limited, RC 1348965, Kitovu Business Hub, Iseyin-Saki Expressway, Iseyin, Oyo State';
@@ -65,6 +67,7 @@ export function facts(d: ReceiptDoc): [string, string][] {
     ['Issued', whenText(d.issued_at)],
     ['Moisture at intake', d.moisture != null ? `${d.moisture}%` : '—'],
     ['From delivery', `${d.intake_ref ?? '—'}${d.lot ? `, ${d.lot}` : ''}`],
+    ...(d.issuer ? [['Issuer', d.issuer], ['Registry', 'StorageX, kept by Kitovu']] as [string, string][] : []),
   ];
 }
 
@@ -80,7 +83,7 @@ export function receiptPdfBuffer(d: ReceiptDoc) {
   p.ctext(L + 59, 61, 'by Kitovu', '#CFE0D5', { size: 9 });
   const title = 'Electronic warehouse receipt';
   p.ctext(R - p.width(title, 14, true), 44, title, '#FFFFFF', { size: 14, bold: true });
-  const sub = 'Printed copy of the live record';
+  const sub = d.issuer ? `Issued by ${d.issuer} on StorageX` : 'Printed copy of the live record';
   p.ctext(R - p.width(sub, 9), 60, sub, '#CFE0D5', { size: 9 });
 
   // Receipt number and status
@@ -128,7 +131,7 @@ export function receiptPdfBuffer(d: ReceiptDoc) {
   p.text(L, y + 13, 'For the warehouse operator', { size: 8, gray: 0.4 });
   p.text(L, y + 26, `${d.warehouse}`, { size: 9.5, bold: true });
   p.text(L, y + 38, d.received_by ? `Received and weighed by ${d.received_by}` : 'Received and weighed at intake', { size: 8.5, gray: 0.25 });
-  p.text(L + half + 10, y + 13, 'For Kitovu Technology Company Limited', { size: 8, gray: 0.4 });
+  p.text(L + half + 10, y + 13, `For ${d.issuer ?? 'Kitovu Technology Company Limited'}`, { size: 8, gray: 0.4 });
   p.text(L + half + 10, y + 26, d.issued_by ? `Issued by ${d.issued_by}` : 'Issued by StorageX', { size: 9.5, bold: true });
   p.text(L + half + 10, y + 38, d.signature ? `Digitally signed${d.key_id ? `, key ${d.key_id}` : ''}` : `Issued through StorageX on ${whenText(d.issued_at).replace(/,? at \d{2}:\d{2} WAT$/, '')}`, { size: 8.5, gray: 0.25 });
 

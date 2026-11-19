@@ -25,6 +25,9 @@ import './routes/messages';
 import './routes/watch';
 import './routes/dashboard';
 import './routes/offers';
+import './routes/issuers';
+import './routes/api';
+import './routes/developers';
 
 const CSP = ["default-src 'self'", "img-src 'self' data:", "style-src 'self'", "script-src 'self'", "form-action 'self'", "frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'"].join('; ');
 const STATIC: Record<string, string> = {
@@ -111,7 +114,7 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
     if (status === 500) console.error(`[error] ${c.method} ${c.path}`, e);
     const message = status === 500 ? 'Sorry, something failed on our side. It has been logged.' : e.message;
     if (!c.done) {
-      if (String(req.headers.accept || '').includes('application/json')) c.json({ error: message }, status);
+      if (c.path.startsWith('/api/') || String(req.headers.accept || '').includes('application/json')) c.json({ error: message }, status);
       else c.html(render(h(ErrorPage, { c, status, message })), status);
     }
   }

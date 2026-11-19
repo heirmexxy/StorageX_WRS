@@ -61,6 +61,7 @@ export function ReceiptPage({ c, r, events, chainOk, url, bal, rels, value, hist
             <dt>Moisture</dt><dd>{r.moisture_pct ? `${Number(r.moisture_pct)}%` : '—'}</dd>
             <dt>Warehouse</dt><dd>{`${r.wh_name} (${r.wh_code}), tier ${r.wh_tier}`}{r.can_back_loans ? '' : ' · cannot back loans now'}</dd>
             <dt>Issued</dt><dd>{`${fmtDate(r.issued_at)}${r.issued_by_name ? ` by ${r.issued_by_name}` : ''}`}</dd>
+            {r.issuer_name && <><dt>Issuer</dt><dd>{r.issuer_name}</dd></>}
             <dt>Value at storage</dt><dd>{r.issue_value_kobo != null ? <><b>{fmtNGN(r.issue_value_kobo, { decimals: false })}</b>{` at ${fmtNGN(r.issue_kobo_per_kg!)}/kg`}</> : 'Not valued at issue'}</dd>
             <dt>Insurance at issue</dt><dd>{r.insurer_name ? `${r.insurer_name}${r.policy_number ? `, policy ${r.policy_number}` : ''}${r.cover_to ? `, cover to ${fmtDay(r.cover_to)}` : ''}` : 'No active policy on record when issued'}</dd>
             <dt>Delivery</dt><dd>{r.intake_ref && can(c.membership, 'stock.manage') ? <a href={`/intakes/${r.intake_ref}`}>{r.intake_ref}</a> : r.intake_ref ?? 'old system'}{r.lots && r.lots > 1 ? ` · receipt ${r.lot_no} of ${r.lots}` : ''}</dd>
@@ -138,6 +139,7 @@ export function PassportPage({ c, p, notice, doc }: { c: Ctx; p: any; notice?: s
           {p.held_kg !== p.net_kg && <><dt>Still held</dt><dd><b>{kg(p.held_kg)}</b></dd></>}
           {p.moisture && <><dt>Moisture at intake</dt><dd>{`${Number(p.moisture)}%`}</dd></>}
           <dt>Warehouse</dt><dd>{`${p.warehouse} (tier ${p.tier})`}</dd>
+          {p.issuer && <><dt>Issued by</dt><dd>{`${p.issuer}, on StorageX`}</dd></>}
           <dt>Insurance</dt><dd>{p.insurance ?? (p.insured ? 'Current policy on record' : 'No current policy on record')}</dd>
           <dt>Value at storage</dt><dd>{p.value_at_storage ? <><b>{fmtNGN(p.value_at_storage.kobo, { decimals: false })}</b>{` at ${fmtNGN(p.value_at_storage.per_kg)}/kg on the day of issue`}</> : 'Not valued at issue'}</dd>
           {p.value_today && <><dt>Value today</dt><dd><b>{fmtNGN(p.value_today.kobo, { decimals: false })}</b>{` at ${fmtNGN(p.value_today.per_kg)}/kg${p.value_at_storage ? ` (${changeText(p.value_today.kobo, p.value_at_storage.kobo)} since storage)` : ''}, valued ${fmtDay(p.value_today.on)}`}</dd></>}

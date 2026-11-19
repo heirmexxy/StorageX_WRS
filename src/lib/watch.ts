@@ -12,7 +12,7 @@ import { health } from './wareguard';
 
 function who(a: Actor) {
   const m = a.membership;
-  if (!m || !can(m, 'warehouses.view') || !['kitovu', 'lender', 'warehouse_operator'].includes(m.org_kind)) throw new UserError('Stock watch is for lenders, warehouse operators and Kitovu.');
+  if (!m || !can(m, 'warehouses.view') || !['kitovu', 'lender', 'warehouse_operator', 'issuer'].includes(m.org_kind)) throw new UserError('Stock watch is for lenders, warehouse operators and Kitovu.');
   return m;
 }
 
@@ -20,7 +20,7 @@ export async function sites(a: Actor) {
   const m = who(a);
   const where = m.org_kind === 'kitovu' ? `EXISTS (SELECT 1 FROM receipts r JOIN receipt_balances b ON b.receipt_id=r.id WHERE r.warehouse_id=w.id AND r.status::text = ANY($2) AND b.remaining_kg > 0) AND $1::uuid IS NULL`
     : m.org_kind === 'lender' ? `EXISTS (SELECT 1 FROM liens li JOIN receipts r ON r.id=li.receipt_id WHERE r.warehouse_id=w.id AND li.lender_org_id=$1 AND li.released_at IS NULL) AND $2::text[] IS NOT NULL`
-    : `w.operator_org_id=$1 AND $2::text[] IS NOT NULL`;
+    : `wh_access(w.id, $1) AND $2::text[] IS NOT NULL`;
   const ws = await db.all<any>(`SELECT w.id, w.code, w.name, w.tier, w.status, s.name AS state FROM warehouses w JOIN states s ON s.code=w.state_code WHERE ${where} ORDER BY w.name`,
     m.org_kind === 'kitovu' ? null : m.org_id, LIVE);
   const h = await health(ws.map((w) => w.id), 24);
@@ -59,7 +59,7 @@ export async function site(a: Actor, code: string) {
       (SELECT row_to_json(p) FROM (SELECT insurer_name, policy_number, cover_to, sum_insured_kobo::float AS sum_insured FROM insurance_policies ip WHERE ip.warehouse_id=w.id AND ip.status='active' AND ip.cover_to >= current_date ORDER BY cover_to DESC LIMIT 1) p) AS policy
     FROM warehouses w JOIN states s ON s.code=w.state_code JOIN organisations o ON o.id=w.operator_org_id WHERE w.code=upper($1)`, String(code).slice(0, 30));
   if (!w) return null;
-  if (m.org_kind === 'warehouse_operator' && w.operator_org_id !== m.org_id) return null;
+  if (['warehouse_operator', 'issuer'].includes(m.org_kind) && !(await db.val('SELECT wh_access($1, $2)', w.id, m.org_id))) return null;
   const stock = await stockAt(a, w.id);
   if (m.org_kind === 'lender' && !stock.length) return null;
   const [wg] = await health([w.id], 48);

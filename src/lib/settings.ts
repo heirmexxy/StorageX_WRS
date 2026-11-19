@@ -32,6 +32,15 @@ export const DEFAULTS = {
   'fees.storage_kobo_per_kg_month': 300,
   'fees.handling_kobo_per_kg': 100,
   'fees.sale_commission_bp': 150,
+  /** Platform fees Kitovu charges partners (0 = not charged). */
+  'fees.issuance_bp': 0,
+  'fees.origination_bp': 0,
+  'fees.certification_kobo': 0,
+  /** Issuers must hold a guarantee of at least this share of the value of their live receipts, and this minimum. */
+  'issuers.guarantee_pct': 5,
+  'issuers.guarantee_min_kobo': 50000000,
+  /** Issuers may issue only where WareGuard is installed and reporting (Kitovu can waive it per issuer for a pilot). */
+  'issuers.require_wareguard': true,
   /** Due-date reminders to farmers: this many days before, on the day after it is missed. Event texts always go. */
   /** All texts to farmers. Turn off until SMS is connected, so nothing is attempted or logged as failed. */
   'notify.sms': true,
@@ -72,6 +81,12 @@ export const LABELS: Record<SettingKey, string> = {
   'fees.storage_kobo_per_kg_month': 'Storage fee (kobo per kg per month)',
   'fees.handling_kobo_per_kg': 'Handling fee (kobo per kg, in and out)',
   'fees.sale_commission_bp': 'Sale commission (basis points: 150 = 1.5%)',
+  'fees.issuance_bp': 'Issuance fee charged to receipt issuers (basis points of the value at storage)',
+  'fees.origination_bp': 'Origination fee charged to lenders (basis points of each loan paid out)',
+  'fees.certification_kobo': 'Certification fee charged to a receipt issuer when certified (kobo)',
+  'issuers.guarantee_pct': 'Issuer guarantee: at least this % of the value of its live receipts',
+  'issuers.guarantee_min_kobo': 'Issuer guarantee: at least this amount (kobo)',
+  'issuers.require_wareguard': 'Issuers may issue only where WareGuard is installed and reporting',
   'notify.sms': 'Send texts to farmers (deliveries, receipts, loans, releases, payments)',
   'notify.reminders': 'Text farmers before a loan is due and when it is missed',
   'notify.due_days': 'Send the due-date reminder this many days before',
@@ -109,7 +124,7 @@ export async function saveSettings(a: Actor, input: Partial<Record<SettingKey, u
     }
     else if (typeof def === 'number') {
       const v = Number(input[k]);
-      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000], 'notify.due_days': [1, 30], 'inspector.farmer_30d_kg': [1000, 1000000], 'alerts.ltv_warning_gap_pct': [1, 30], 'wareguard.max_temp_c': [15, 45], 'wareguard.max_rh_pct': [40, 95], 'wareguard.door_open_minutes': [5, 240], 'wareguard.offline_minutes': [10, 1440] } as Record<string, number[]>)[k] ?? [1, 180];
+      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000], 'fees.issuance_bp': [0, 500], 'fees.origination_bp': [0, 500], 'fees.certification_kobo': [0, 1e11], 'issuers.guarantee_pct': [0, 50], 'issuers.guarantee_min_kobo': [0, 1e12], 'notify.due_days': [1, 30], 'inspector.farmer_30d_kg': [1000, 1000000], 'alerts.ltv_warning_gap_pct': [1, 30], 'wareguard.max_temp_c': [15, 45], 'wareguard.max_rh_pct': [40, 95], 'wareguard.door_open_minutes': [5, 240], 'wareguard.offline_minutes': [10, 1440] } as Record<string, number[]>)[k] ?? [1, 180];
       if (!Number.isFinite(v) || v < lo || v > hi) throw new UserError(`${LABELS[k]}: between ${lo} and ${hi}.`);
       next[k] = v;
     }

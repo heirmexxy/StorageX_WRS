@@ -12,7 +12,7 @@ export const PERMISSIONS = [
   'reports.view',
 ] as const;
 export type Permission = typeof PERMISSIONS[number];
-export type OrgKind = 'kitovu' | 'lender' | 'warehouse_operator' | 'buyer' | 'insurer' | 'cooperative' | 'field_partner_network' | 'distribution_partner' | 'other';
+export type OrgKind = 'kitovu' | 'lender' | 'warehouse_operator' | 'buyer' | 'insurer' | 'cooperative' | 'field_partner_network' | 'distribution_partner' | 'issuer' | 'other';
 
 interface RoleDef { label: string; perms: readonly Permission[] }
 const ALL = PERMISSIONS;
@@ -40,6 +40,14 @@ export const ROLES: Record<OrgKind, Record<string, RoleDef>> = {
   cooperative: { coop_admin: { label: 'Cooperative admin', perms: ['users.manage', 'farmers.view'] } },
   field_partner_network: { network_admin: { label: 'Network admin', perms: ['users.manage', 'farmers.view', 'farmers.edit', 'field_partners.manage'] } },
   distribution_partner: { partner_admin: { label: 'Partner admin', perms: ['users.manage', 'receipts.view'] } },
+  // A company issuing receipts on StorageX at warehouses it owns, leases or shares with Kitovu. Its clerks record
+  // deliveries; its officers review them and issue receipts (never the same person for one delivery); its admin
+  // also prepares loan requests to lenders that accept its receipts.
+  issuer: {
+    issuer_admin: { label: 'Issuer admin', perms: ['users.manage', 'audit.view', 'farmers.view', 'farmers.edit', 'warehouses.view', 'stock.manage', 'receipts.view', 'receipts.issue', 'reports.view'] },
+    issuer_officer: { label: 'Receipt officer', perms: ['farmers.view', 'farmers.edit', 'warehouses.view', 'stock.manage', 'receipts.view', 'receipts.issue'] },
+    issuer_clerk: { label: 'Gate clerk', perms: ['farmers.view', 'warehouses.view', 'stock.manage', 'receipts.view'] },
+  },
   other: {},
 };
 

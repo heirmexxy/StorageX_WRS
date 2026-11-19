@@ -35,7 +35,7 @@ function need(a: Actor) { if (!can(a.membership, 'stock.manage')) throw new User
 
 async function warehousesFor(a: Actor) {
   return db.all<{ id: string; code: string; name: string; state_code: string; lat: string | null; lng: string | null; status: string }>(
-    `SELECT id, code, name, state_code, lat::text, lng::text, status FROM warehouses WHERE status <> 'closed' AND ($1::uuid IS NULL OR operator_org_id=$1) ORDER BY name`,
+    `SELECT id, code, name, state_code, lat::text, lng::text, status FROM warehouses WHERE status <> 'closed' AND wh_access(id, $1) ORDER BY name`,
     isKitovu(a) ? null : a.membership!.org_id);
 }
 
@@ -231,7 +231,7 @@ export async function listIntakes(a: Actor, q: { status?: string; warehouse?: st
     `SELECT i.id, i.ref, i.status, i.net_kg::float, i.bags, i.moisture_pct::float, i.captured_at, i.received_at, i.flags, i.farmer_confirmation,
             f.code AS farmer_code, f.full_name AS farmer_name, f.kyc_level, w.code AS wh_code, w.name AS wh_name, c.name AS commodity, u.full_name AS clerk, count(*) OVER()::int AS total_rows
      FROM intakes i JOIN farmers f ON f.id=i.farmer_id JOIN warehouses w ON w.id=i.warehouse_id JOIN commodities c ON c.code=i.commodity_code JOIN users u ON u.id=i.clerk_user_id
-     WHERE ($1::uuid IS NULL OR w.operator_org_id=$1) AND ($2 = '' OR i.status=$2) AND ($3 = '' OR w.code=$3)
+     WHERE wh_access(w.id, $1) AND ($2 = '' OR i.status=$2) AND ($3 = '' OR w.code=$3)
      ORDER BY (i.status IN ('submitted','held')) DESC, i.received_at DESC, i.ref LIMIT 100 OFFSET $4`,
     scope, ['submitted', 'accepted', 'held', 'rejected'].includes(String(q.status)) ? q.status : '', clean(q.warehouse, 20), pageOffset(q.page));
 }
@@ -243,14 +243,15 @@ export async function intakeByRef(a: Actor, ref: string) {
             w.lat::float AS wh_lat, w.lng::float AS wh_lng, c.name AS commodity, c.max_moisture_pct::float AS max_moisture, u.full_name AS clerk, ru.full_name AS reviewer, cu.full_name AS clearer
      FROM intakes i JOIN farmers f ON f.id=i.farmer_id JOIN warehouses w ON w.id=i.warehouse_id JOIN commodities c ON c.code=i.commodity_code
        JOIN users u ON u.id=i.clerk_user_id LEFT JOIN users ru ON ru.id=i.reviewed_by LEFT JOIN users cu ON cu.id=i.hold_cleared_by
-     WHERE i.ref=upper($1) AND ($2::uuid IS NULL OR w.operator_org_id=$2)`, clean(ref, 30), scope);
+     WHERE i.ref=upper($1) AND wh_access(w.id, $2)`, clean(ref, 30), scope);
   if (!i) return undefined;
   i.photos = await db.all('SELECT idx, kind, file_id, sha256 FROM intake_photos WHERE intake_id=$1 ORDER BY idx', i.id);
   return i;
 }
 
 export async function reviewIntake(a: Actor, ref: string, decision: 'accept' | 'hold' | 'reject', note: string) {
-  if (!isKitovu(a) || !can(a.membership, 'stock.manage')) throw new UserError('Only Kitovu operations review deliveries.');
+  // Kitovu operations review every delivery; a certified issuer's receipt officers review those at its own warehouses.
+  if (!can(a.membership, 'stock.manage') || !(isKitovu(a) || (a.membership!.org_kind === 'issuer' && can(a.membership, 'receipts.issue')))) throw new UserError('Only Kitovu operations, or an issuer’s receipt officers, review deliveries.');
   const i = await intakeByRef(a, ref);
   if (!i) throw new UserError('Delivery not found.');
   if (i.clerk_user_id === a.user.id) throw new UserError('You recorded this delivery, so someone else must review it.');

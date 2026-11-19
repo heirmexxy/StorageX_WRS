@@ -7,6 +7,7 @@
 //   5. When paid and delivered, a finance person who did not propose the sale settles it: per receipt, Kitovu fees,
 //      then the lender's loan (posted as a repayment, releasing the lien), then the farmer's balance.
 //   6. Payouts are recorded with transfer references by someone other than the settler; the farmer is texted.
+import { emit } from './webhooks';
 import { db, tx } from './db';
 import { audit } from './audit';
 import { actorOf, type Actor } from './auth';
@@ -91,6 +92,8 @@ export async function saleAlerts(saleId: string, kind: 'sale_proposed' | 'sale_a
       sale_settled: { level: 'info' as const, title: `Sale ${s.ref} paid out`, body: `${s.buyer_name} paid for ${what}. Your share has been posted to the loan as a repayment.` },
     }[kind];
     await raise(org, { kind, ...msg, link: `/sales/${s.ref}`, key: `${kind}:${s.ref}` });
+    await emit(org, kind.replace('_', '.') as any, { sale: s.ref, buyer: s.buyer_name, kobo_per_kg: s.perkg, commodity: s.commodity_code, warehouse: s.wh_name,
+      items: xs.map((x) => ({ item_id: x.id, receipt_no: x.receipt_no, loan_no: x.loan_no, kg: x.kgf, gross_kobo: x.gross })), owed_kobo: owed, gross_kobo: gross }, s.ref);
   }
   if (!byLender.size) await raise(null, { kind, level: 'info', title: `Sale ${s.ref}: ${kind.replace('sale_', '')}`, body: `${s.buyer_name}, ${price}, ${items.length} receipt(s) of ${s.crop} at ${s.wh_name}.`, link: `/sales/${s.ref}`, key: `${kind}:${s.ref}` });
   if (kind === 'sale_proposed') for (const x of items)
@@ -295,6 +298,8 @@ export async function settle(a: Actor, saleId: string) {
         totals[l.party] += l.amount;
         if (l.party === 'lender' && l.amount > 0) {
           await db.run(`INSERT INTO loan_entries (loan_id, kind, amount_kobo, on_date, reference, note, recorded_by) VALUES ($1,'repayment',$2,$3,$4,$5,$6)`, l.loan_id, l.amount, day, s.ref, 'from sale proceeds', a.user.id);
+          const lno = await db.val<string>('SELECT loan_no FROM loans WHERE id=$1', l.loan_id);
+          await emit(l.org_id, 'loan.repayment', { loan_no: lno, amount_kobo: l.amount, on: day, reference: s.ref, source: 'sale' }, `${lno}:${s.ref}`);
         }
       }
       totals.shortfall += it.shortfall;
@@ -302,7 +307,7 @@ export async function settle(a: Actor, saleId: string) {
     // Close loans paid in full and release their liens; mark every receipt settled.
     for (const loanId of [...new Set(wf.map((w) => w.loan_id).filter(Boolean))] as string[]) {
       const ln = (await db.get<any>('SELECT * FROM loans WHERE id=$1', loanId))!;
-      if (position(ln, await entriesOf(loanId)).outstanding <= 0) await db.run(`UPDATE loans SET status='repaid', closed_at=now() WHERE id=$1`, loanId);
+      if (position(ln, await entriesOf(loanId)).outstanding <= 0) { await db.run(`UPDATE loans SET status='repaid', closed_at=now() WHERE id=$1`, loanId); await emit(ln.lender_org_id, 'loan.repaid', { loan_no: ln.loan_no, via: 'sale', sale: s.ref }, ln.loan_no); }
     }
     for (const it of wf) {
       await db.run(`UPDATE liens SET released_at=now(), release_reason=$2 WHERE receipt_id=$1 AND released_at IS NULL`, it.receipt_id, `sold under ${s.ref}`);

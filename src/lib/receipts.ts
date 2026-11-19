@@ -15,6 +15,7 @@ import { receiptPdfBuffer, valueFromRow } from './receipt-doc';
 import { pageOffset } from './registry';
 import { clean } from './util';
 import { referencePrice } from './valuation';
+import { assertCanIssue, charge } from './issuers';
 import { valueKobo } from './money';
 
 const isKitovu = (a: Actor) => a.membership?.org_kind === 'kitovu';
@@ -24,7 +25,7 @@ export interface Receipt {
   bags: number | null; net_weight_kg: string; warehouse_id: string; wh_code: string; wh_name: string; wh_state: string; wh_tier: string; can_back_loans: boolean;
   owner_farmer_id: string | null; farmer_code: string | null; farmer_name: string | null; issued_at: Date | null; closed_at: Date | null; closed_reason: string | null;
   intake_id: string | null; intake_ref: string | null; lot_no: number | null; lots: number | null; signature: string | null; sig_key_id: string | null; issued_by_name: string | null; source: string;
-  issue_kobo_per_kg: number | null; issue_value_kobo: number | null; issue_price: any; insurer_name: string | null; policy_number: string | null; cover_to: Date | null;
+  issue_kobo_per_kg: number | null; issue_value_kobo: number | null; issue_price: any; insurer_name: string | null; policy_number: string | null; cover_to: Date | null; issuer_org_id: string | null; issuer_name: string | null;
 }
 
 /** The fixed facts that are signed. Changing any of them breaks the signature. */
@@ -36,16 +37,18 @@ export const verifyUrl = (r: { verify_token: string; signature: string | null })
 const COLS = `r.id, r.receipt_no, r.verify_token, r.status::text AS status, r.commodity_code, c.name AS commodity, r.grade, r.moisture_pct::text, r.bags, r.net_weight_kg::text,
   r.warehouse_id, w.code AS wh_code, w.name AS wh_name, s.name AS wh_state, w.tier AS wh_tier, w.can_back_loans, r.owner_farmer_id, f.code AS farmer_code, f.full_name AS farmer_name,
   r.issued_at, r.closed_at, r.closed_reason, r.intake_id, i.ref AS intake_ref, r.lot_no, r.lots, r.signature, r.sig_key_id, u.full_name AS issued_by_name, r.source,
-  r.issue_kobo_per_kg::float AS issue_kobo_per_kg, r.issue_value_kobo::float AS issue_value_kobo, r.issue_price, ip.insurer_name, ip.policy_number, ip.cover_to`;
+  r.issue_kobo_per_kg::float AS issue_kobo_per_kg, r.issue_value_kobo::float AS issue_value_kobo, r.issue_price, ip.insurer_name, ip.policy_number, ip.cover_to, r.issuer_org_id, io.name AS issuer_name`;
 const FROM = `FROM receipts r JOIN commodities c ON c.code=r.commodity_code JOIN warehouses w ON w.id=r.warehouse_id JOIN states s ON s.code=w.state_code
   LEFT JOIN farmers f ON f.id=r.owner_farmer_id LEFT JOIN intakes i ON i.id=r.intake_id LEFT JOIN users u ON u.id=r.issued_by
-  LEFT JOIN insurance_policies ip ON ip.id=r.insurance_policy_id`;
+  LEFT JOIN insurance_policies ip ON ip.id=r.insurance_policy_id
+  LEFT JOIN organisations io ON io.id=r.issuer_org_id`;
 
 /** Who sees which receipt. $1 = actor's org. Lenders: only farmers who consented to them (pledges come in Build 7). */
 function scope(a: Actor) {
   const m = a.membership!;
   if (m.org_kind === 'kitovu') return { where: '$1::uuid IS NULL', arg: null };
   if (m.org_kind === 'warehouse_operator') return { where: 'w.operator_org_id = $1', arg: m.org_id };
+  if (m.org_kind === 'issuer') return { where: '(r.issuer_org_id = $1 OR wh_access(w.id, $1))', arg: m.org_id };
   if (m.org_kind === 'lender') return { where: `(EXISTS (SELECT 1 FROM farmer_consents fc WHERE fc.farmer_id=r.owner_farmer_id AND fc.org_id=$1 AND fc.withdrawn_at IS NULL) OR EXISTS (SELECT 1 FROM liens li WHERE li.receipt_id=r.id AND li.lender_org_id=$1))`, arg: m.org_id };
   if (m.org_kind === 'field_partner_network' || m.org_kind === 'cooperative')
     return { where: `(EXISTS (SELECT 1 FROM memberships mm WHERE mm.user_id=f.registered_by_user AND mm.org_id=$1) OR EXISTS (SELECT 1 FROM field_partners fp WHERE fp.id=f.registered_by_partner AND fp.org_id=$1))`, arg: m.org_id };
@@ -121,11 +124,13 @@ export function lotsFor(net: number, bags: number, input: string) {
 }
 
 export async function issueFromIntake(a: Actor, intakeId: string, split = '') {
-  if (!isKitovu(a) || !can(a.membership, 'receipts.issue')) throw new UserError('Only Kitovu staff with receipt-issuing rights can issue receipts.');
+  const issuerOrg = a.membership?.org_kind === 'issuer' ? a.membership.org_id : null;
+  if (!(isKitovu(a) || issuerOrg) || !can(a.membership, 'receipts.issue')) throw new UserError('Only Kitovu staff or a certified issuer’s receipt officers can issue receipts.');
   return tx(async () => {
     await db.run('SELECT 1 FROM intakes WHERE id=$1 FOR UPDATE', intakeId);   // one issuer at a time per delivery
     const i = await issuable(intakeId);
     if (!i) throw new UserError('Delivery not found.');
+    if (issuerOrg && !(await db.val('SELECT wh_access($1, $2)', i.wh_id, issuerOrg))) throw new UserError('Delivery not found.');
     const b = blockers(i, a);
     if (b.length) throw new UserError(b.join(' '));
     const lots = lotsFor(i.net, i.bags, split);
@@ -141,6 +146,9 @@ export async function issueFromIntake(a: Actor, intakeId: string, split = '') {
     const basis = ref.kobo_per_kg ? { scope: ref.scope, state: ref.state, from: ref.from, to: ref.to, window_days: ref.window_days, observations: ref.observations.length, markets: [...new Set(ref.observations.map((o) => o.market))].slice(0, 4) } : null;
     const policy = await db.val<string>(`SELECT id FROM insurance_policies WHERE warehouse_id=$1 AND status='active' AND (cover_from IS NULL OR cover_from <= $2::date) AND cover_to >= $2::date ORDER BY cover_to DESC LIMIT 1`,
       i.wh_id, now.toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' }));
+    // An issuer other than Kitovu passes the same gates for every receipt: certified, warehouse linked and
+    // insured, WareGuard reporting, guarantee big enough for this receipt too.
+    if (issuerOrg) await assertCanIssue(issuerOrg, i.wh_id, ref.kobo_per_kg ? valueKobo(i.net, ref.kobo_per_kg) : 0);
     const issued: { no: string; token: string; kg: number; sig: string }[] = [];
     for (let k = 0; k < lots.length; k++) {
       const no = prefix + String(++seq).padStart(4, '0');
@@ -149,13 +157,17 @@ export async function issueFromIntake(a: Actor, intakeId: string, split = '') {
       const sig = sign(signedFacts({ receipt_no: no, verify_token: token, commodity_code: i.commodity_code, net_weight_kg: lots[k].kg, wh_code: i.wh_code, issued_at: now }));
       const row = (await db.get<{ id: string }>(
         `INSERT INTO receipts (receipt_no, verify_token, depositor_farmer_id, owner_farmer_id, warehouse_id, commodity_code, grade, moisture_pct, bags, net_weight_kg, status, issued_at,
-           intake_id, lot_no, lots, issued_by, source, signature, sig_key_id, issue_kobo_per_kg, issue_value_kobo, issue_price, insurance_policy_id, unit_price_kobo, value_kobo)
-         VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,'issued',$10,$11,$12,$13,$14,'app',$15,$16,$17,$18,$19,$20,$17,$18) RETURNING id`,
+           intake_id, lot_no, lots, issued_by, source, signature, sig_key_id, issue_kobo_per_kg, issue_value_kobo, issue_price, insurance_policy_id, unit_price_kobo, value_kobo, issuer_org_id)
+         VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,'issued',$10,$11,$12,$13,$14,'app',$15,$16,$17,$18,$19,$20,$17,$18,$21) RETURNING id`,
         no, token, i.farmer_id, i.wh_id, i.commodity_code, i.grade, i.moisture, lots[k].bags, lots[k].kg, now, i.id, k + 1, lots.length, a.user.id, sig, keyId(),
-        ref.kobo_per_kg, ref.kobo_per_kg ? valueKobo(lots[k].kg, ref.kobo_per_kg) : null, basis ? JSON.stringify(basis) : null, policy ?? null))!;
+        ref.kobo_per_kg, ref.kobo_per_kg ? valueKobo(lots[k].kg, ref.kobo_per_kg) : null, basis ? JSON.stringify(basis) : null, policy ?? null, issuerOrg))!;
       await db.run(`INSERT INTO receipt_events (receipt_id, event_type, occurred_at, actor, data) VALUES ($1,'issued',$2,$3,$4)`, row.id, now, `user:${a.user.id}`,
         JSON.stringify({ receipt_no: no, delivery: i.ref, farmer: i.farmer_code, warehouse: i.wh_code, commodity: i.commodity_code, net_kg: lots[k].kg, bags: lots[k].bags, grade: i.grade, moisture_pct: i.moisture, lot: `${k + 1}/${lots.length}`, signature: sig,
-          value_at_storage: ref.kobo_per_kg ? { kobo_per_kg: ref.kobo_per_kg, kobo: valueKobo(lots[k].kg, ref.kobo_per_kg) } : null, insurance_policy: policy ?? null }));
+          value_at_storage: ref.kobo_per_kg ? { kobo_per_kg: ref.kobo_per_kg, kobo: valueKobo(lots[k].kg, ref.kobo_per_kg) } : null, insurance_policy: policy ?? null, issuer: issuerOrg ? a.membership!.org_name : 'Kitovu' }));
+      if (issuerOrg && ref.kobo_per_kg) {
+        const bp = (await getSettings())['fees.issuance_bp'];
+        await charge(issuerOrg, 'issuance', Math.round(valueKobo(lots[k].kg, ref.kobo_per_kg) * bp / 10_000), no, { bp, value_at_storage: valueKobo(lots[k].kg, ref.kobo_per_kg) }, a.user.id);
+      }
       issued.push({ no, token, kg: lots[k].kg, sig });
     }
     await audit(actorOf(a), 'receipt.issued', { entity: 'intake', entityId: i.id, data: { delivery: i.ref, receipts: issued.map((x) => x.no) } });
@@ -225,6 +237,7 @@ export async function passport(token: string, sig: string | undefined, ip: strin
     chain_ok: await chainOk(r.id), signature_ok: storedSigOk || r.source !== 'app', legacy: r.source !== 'app', qr_sig: qrSig, checked_at: new Date(), key_id: r.sig_key_id,
     value_at_storage: r.issue_value_kobo != null ? { kobo: Number(r.issue_value_kobo), per_kg: Number(r.issue_kobo_per_kg) } : null,
     value_today: today && !['closed', 'settled', 'cancelled', 'expired'].includes(r.status) ? { kobo: Number(today.market_value_kobo), per_kg: Number(today.kobo_per_kg), on: today.valued_on } : null,
+    issuer: r.issuer_name ?? null,
     insurance: r.insurer_name ? `${r.insurer_name}${r.policy_number ? `, policy ${r.policy_number}` : ''}${r.cover_to ? `, cover to ${new Date(r.cover_to).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}` : null,
   };
 }
@@ -243,7 +256,7 @@ export async function receiptPdf(a: Actor, no: string) {
     depositor: r.farmer_name ?? '—', depositor_code: r.farmer_code ?? '—', issued_at: r.issued_at ?? new Date(),
     intake_ref: r.intake_ref, lot: r.lots && r.lots > 1 ? `receipt ${r.lot_no} of ${r.lots}` : null,
     issued_by: r.issued_by_name, received_by: extra?.clerk ?? null, url: verifyUrl(r), key_id: r.sig_key_id, signature: r.signature,
-    value: valueFromRow(r), insurance: r.insurer_name ? { insurer: r.insurer_name, policy_no: r.policy_number, cover_to: r.cover_to } : null,
+    issuer: r.issuer_name ?? null, value: valueFromRow(r), insurance: r.insurer_name ? { insurer: r.insurer_name, policy_no: r.policy_number, cover_to: r.cover_to } : null,
   });
   await audit(actorOf(a), 'receipt.printed', { entity: 'receipt', entityId: r.id, data: { receipt_no: r.receipt_no } });
   return { pdf, name: `${r.receipt_no}.pdf` };

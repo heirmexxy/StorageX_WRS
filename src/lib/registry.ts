@@ -29,7 +29,8 @@ function farmerScope(a: Actor): { where: string; arg: string | null } {
   if (m.org_kind === 'lender') return { where: `EXISTS (SELECT 1 FROM farmer_consents fc WHERE fc.farmer_id=f.id AND fc.org_id=$1 AND fc.withdrawn_at IS NULL)`, arg: m.org_id };
   return {
     where: `(EXISTS (SELECT 1 FROM memberships mm WHERE mm.user_id=f.registered_by_user AND mm.org_id=$1)
-             OR EXISTS (SELECT 1 FROM field_partners fp WHERE fp.id=f.registered_by_partner AND fp.org_id=$1))`,
+             OR EXISTS (SELECT 1 FROM field_partners fp WHERE fp.id=f.registered_by_partner AND fp.org_id=$1)
+             OR EXISTS (SELECT 1 FROM receipts r WHERE r.owner_farmer_id=f.id AND r.issuer_org_id=$1))`,
     arg: m.org_id,
   };
 }
@@ -256,17 +257,17 @@ const WH_COLS = `w.id, w.code, w.name, w.operator_org_id, o.name AS operator_nam
   w.lat::text, w.lng::text, w.capacity_kg::text, w.can_back_loans, w.needs_review, w.commodities, w.contact_name, w.contact_phone, w.updated_at`;
 
 /** Lenders, insurers and Kitovu see every warehouse profile (they assess sites); operators see their own. */
-function whScope(a: Actor) { const k = a.membership!.org_kind; return ['kitovu', 'lender', 'insurer'].includes(k) ? null : a.membership!.org_id; }
+function whScope(a: Actor) { const k = a.membership!.org_kind; return ['kitovu', 'lender', 'insurer'].includes(k) ? null : a.membership!.org_id; }   // issuers: their own or linked warehouses
 
 export async function listWarehouses(a: Actor) {
   need(a, 'warehouses.view');
   return db.all<Warehouse>(`SELECT ${WH_COLS} FROM warehouses w JOIN organisations o ON o.id=w.operator_org_id JOIN states s ON s.code=w.state_code
-    WHERE ($1::uuid IS NULL OR w.operator_org_id=$1) ORDER BY w.status='closed', w.name`, whScope(a));
+    WHERE wh_access(w.id, $1) ORDER BY w.status='closed', w.name`, whScope(a));
 }
 export async function warehouseByCode(a: Actor, code: string) {
   need(a, 'warehouses.view');
   return db.get<Warehouse>(`SELECT ${WH_COLS} FROM warehouses w JOIN organisations o ON o.id=w.operator_org_id JOIN states s ON s.code=w.state_code
-    WHERE w.code=upper($1) AND ($2::uuid IS NULL OR w.operator_org_id=$2)`, clean(code, 20), whScope(a));
+    WHERE w.code=upper($1) AND wh_access(w.id, $2)`, clean(code, 20), whScope(a));
 }
 export const policiesFor = (warehouseId: string) => db.all(`SELECT * FROM insurance_policies WHERE warehouse_id=$1 ORDER BY cover_to DESC NULLS LAST`, warehouseId);
 

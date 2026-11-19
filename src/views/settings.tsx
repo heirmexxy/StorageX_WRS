@@ -69,6 +69,14 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats, links }: { c: C
           ))}
         </section>
         <section className="card">
+          <h2>Receipt issuers and platform fees</h2>
+          <p className="muted">Companies certified under <a href="/issuers">Receipt issuers</a> issue receipts at their own, leased or shared warehouses. Platform fees are recorded as charges to the partner under <a href="/issuers/charges">Platform fees</a>; 0 means not charged.</p>
+          {(['fees.issuance_bp', 'fees.origination_bp', 'fees.certification_kobo', 'issuers.guarantee_pct', 'issuers.guarantee_min_kobo'] as const).map((k) => (
+            <label className="field" key={k}><span>{LABELS[k]}</span><input name={k} type="number" step="1" defaultValue={String(s[k])} /></label>
+          ))}
+          {box('issuers.require_wareguard')}
+        </section>
+        <section className="card">
           <h2>Farmer messages and USSD</h2>
           <p className="muted">Texts about deliveries, receipts, loans, releases and payments always go: they are how a farmer spots a mistake or fraud. Reminders can be switched off here or for one farmer. Wording and translations are under <a href="/admin/messages">Farmer messages</a>.</p>
           {box('notify.sms')}

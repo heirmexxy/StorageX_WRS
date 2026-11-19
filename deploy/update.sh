@@ -24,6 +24,7 @@ npm install --no-audit --no-fund --silent
 npm run build --silent
 npm run migrate --silent
 npm run seed --silent
+bash deploy/jobs.sh >/dev/null 2>&1 || echo "(could not schedule the frequent jobs: run deploy/jobs.sh)"
 sudo /usr/bin/systemctl restart storagex
 if healthy; then echo "Deployed $NEW"; exit 0; fi
 echo "New version failed its health check — rolling back the code to $PREV (the database keeps the new migrations)"

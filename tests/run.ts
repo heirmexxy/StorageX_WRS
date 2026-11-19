@@ -1183,6 +1183,65 @@ async function main() {
     await N.setFarmerMessaging(ops, f.id, { language: 'en', reminders: '1' });
   });
 
+  console.log('\nReceipt issuers');
+  const IS = await import('../src/lib/issuers');
+  const issId = await A.createOrg(admin, { code: 'AYOG', name: 'Ayo Grains Ltd', kind: 'issuer' });
+  const issAdmin = await makeUser(admin, 'admin@ayog.test', issId, 'issuer_admin');
+  const issClerk = await makeUser(issAdmin, 'gate@ayog.test', issId, 'issuer_clerk');
+  let issNo = '', issLoan = '';
+  await t('an issuer is certified only when every rule is met: warehouse, insurance, WareGuard, guarantee, two people', async () => {
+    ok((await IS.blockers(issId)).some((b) => b.includes('No warehouse')));
+    await rejects(IS.certify(admin, 'AYOG'));
+    await rejects(IS.linkWarehouse(issAdmin, 'AYOG', { warehouse: 'WH-NI-MNA-02', basis: 'own' }));
+    await rejects(IS.linkWarehouse(admin, 'AYOG', { warehouse: 'WH-NI-MNA-02', basis: 'kitovu_bays' }));
+    await IS.linkWarehouse(admin, 'AYOG', { warehouse: 'WH-NI-MNA-02', basis: 'kitovu_bays', detail: 'Bays 5 and 6' });
+    const b = await IS.blockers(issId);
+    ok(b.some((x) => x.includes('Guarantee')), JSON.stringify(b));
+    await IS.setGuarantee(admin, 'AYOG', { amount: '600000', reference: 'TRF-GUAR-0001' });
+    eq(await IS.blockers(issId), [], 'ready');
+    await IS.certify(admin, 'AYOG');
+    eq((await IS.issuerByCode('AYOG')).status, 'certified');
+  });
+  await t('the issuer’s clerk records a delivery, its officer reviews and issues: receipts carry the issuer, and the fee is recorded', async () => {
+    await S.saveSettings(admin, { 'fees.issuance_bp': '50', 'fees.origination_bp': '100' } as any);
+    const r1 = makeRecord(issClerk, { weighings: [{ bags: 20, gross_kg: 2010, photo: '' }] });
+    r1.rec.weighings[0].photo = r1.rec.bag_photos[0]; r1.rec.evidence_hash = I.recordHash(r1.rec);
+    const out = await I.ingest(issClerk, JSON.stringify(r1.rec), r1.files, { deviceClock: new Date().toISOString() });
+    eq(out.result, 'stored');
+    await rejects(I.reviewIntake(issClerk, out.ref, 'accept', ''));
+    // Same farmer, many deliveries in these tests: the intake inspector holds it, and Kitovu compliance clears it.
+    const i0 = (await I.intakeByRef(admin, out.ref))!;
+    if ((i0.flags as any[]).some((f) => f.severity === 'hold')) await I.clearHold(compliance, out.ref, 'Checked with the issuer: a real delivery');
+    await I.reviewIntake(issAdmin, out.ref, 'accept', 'Checked at the gate');
+    const iid = (await db.val<string>('SELECT id FROM intakes WHERE ref=$1', out.ref))!;
+    const res = await Rc.issueFromIntake(issAdmin, iid);
+    issNo = res.receipts[0].no;
+    const r = (await Rc.receiptByNo(issAdmin, issNo))!;
+    eq(r.issuer_org_id, issId); eq(r.issuer_name, 'Ayo Grains Ltd');
+    const ch = await db.get<any>(`SELECT amount_kobo::float AS a FROM platform_charges WHERE kind='issuance' AND ref=$1`, issNo);
+    eq(ch.a, Math.round(r.issue_value_kobo! * 50 / 10_000), 'issuance fee: 0.5% of the value at storage');
+    ok((await Rc.receiptPdf(admin, issNo)).pdf.toString('latin1').includes('Issued by Ayo Grains Ltd on StorageX'));
+    eq((await Rc.passport(r.verify_token, undefined, '9.9.9.6'))!.issuer, 'Ayo Grains Ltd');
+    eq((await Rc.receiptByNo(other, issNo)), undefined, 'other lenders cannot see it without consent');
+  });
+  await t('lenders choose the issuers they accept; the issuer’s loan requests respect the cap', async () => {
+    const prod = (await F.productsOf(accionId)).find((p) => p.name === 'Harvest 90');
+    await rejects(F.createBatch(issAdmin, prod.id));
+    await rejects(IS.setTerms(officer, 'AYOG', { accepted: '1' }));
+    await IS.setTerms(accionAdmin, 'AYOG', { accepted: '1', max_ltv: '40' });
+    const b = await F.createBatch(issAdmin, prod.id);
+    const r = (await Rc.receiptByNo(admin, issNo))!;
+    const cap = await F.capacity(accionId, [r.id]);
+    ok(cap.maxLoan <= Math.floor(cap.market * 0.4) + 1, `${cap.maxLoan} vs ${cap.market}`);
+    await rejects(F.addLine(issAdmin, b.id, { farmer: ada, receipts: watchNo }));
+    const add = await F.addLine(issAdmin, b.id, { farmer: ada, receipts: issNo });
+    eq(add.max, cap.maxLoan);
+    await F.submitBatch(issAdmin, b.id, (id) => reviewLine(id, null));
+    ok((await F.batchesFor(issAdmin)).some((x) => x.ref === b.ref), 'the issuer sees its own request');
+    eq((await IS.lenderTermsFor(otherId, r.id)).ok, false, 'another lender has not accepted this issuer');
+    const card = await IS.scorecard(issId);
+    eq(card.receipts, 1); eq(card.lenders_accepting, 1);
+  });
   console.log('\nAgents: data steward');
   await t('data steward opens one item per problem, closes it when fixed, and respects a person’s judgement', async () => {
     const madu = await R.createFarmer(ops, { full_name: 'Madu Okafor', phone: '08055550123', state_code: 'NI' });
@@ -1415,6 +1474,115 @@ async function main() {
     const dl = await req('GET', '/tower/loan-book.csv'); eq(dl.status, 200); ok(dl.text.split('\n')[0].includes('loan_no'), dl.text.slice(0, 200));
     delete jar.sx_sid;
     await signInAs(gateClerk); eq((await req('GET', '/tower')).status, 403); delete jar.sx_sid;
+  });
+  console.log('\nPartner API and webhooks');
+  const API = await import('../src/lib/api');
+  const WH = await import('../src/lib/webhooks');
+  const hooks: { headers: any; body: string }[] = [];
+  const hookSrv = http.createServer((rq, rs) => { let b = ''; rq.on('data', (d) => (b += d)); rq.on('end', () => { hooks.push({ headers: rq.headers, body: b }); rs.writeHead(200); rs.end('ok'); }); });
+  await new Promise<void>((r) => hookSrv.listen(0, '127.0.0.1', r));
+  hookSrv.unref();
+  const hookUrl = `http://127.0.0.1:${(hookSrv.address() as AddressInfo).port}/storagex`;
+  let decideKey = '', payKey = '', whSecret = '';
+  async function call(method: string, path: string, key: string, body?: unknown, headers: Record<string, string> = {}) {
+    const r = await fetch(base + path, { method, headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const text = await r.text();
+    let json: any = null; try { json = JSON.parse(text); } catch { /* not json */ }
+    return { status: r.status, json, headers: r.headers };
+  }
+  await t('API keys: shown once, hashed, scoped, and acting as the person who made them', async () => {
+    await rejects(API.createKey(officer, { name: 'x', scopes: 'wareguard:write' }));
+    const k1 = await API.createKey(accionAdmin, { name: 'Loan approvals', scopes: ['loans:read', 'loans:decide', 'allocations:write', 'sales:approve', 'receipts:read', 'alerts:read', 'issuers:read'], webhook_url: hookUrl });
+    decideKey = k1.key; whSecret = k1.webhook_secret!;
+    ok(/^sxk_[A-Za-z0-9]{12}_[0-9a-f]{48}$/.test(decideKey) && whSecret.startsWith('whsec_'));
+    eq(await db.val('SELECT count(*)::int FROM api_clients WHERE key_hash=$1', crypto.createHash('sha256').update(decideKey).digest('hex')), 1, 'only the hash is kept');
+    payKey = (await API.createKey(lfin, { name: 'Payouts', scopes: 'loans:read loans:disburse' })).key;
+    eq((await call('GET', '/api/v1/me', 'sxk_nope')).status, 401);
+    const me = await call('GET', '/api/v1/me', decideKey);
+    eq(me.status, 200); eq(me.json.organisation.name, 'Accion Microfinance Bank'); eq(me.json.acting_as.role, 'lender_admin');
+    eq((await call('GET', '/api/v1/issuers', payKey)).status, 403, 'scope missing');
+    ok((await API.checkUserRef('usr_8f2a1')) === 'usr_8f2a1');
+    ok((await rejects(Promise.resolve().then(() => API.checkUserRef('08031234567')))).message.includes('phone'));
+  });
+  await t('a fintech decides a loan request, splits it among its users, and a second person records the payout', async () => {
+    const lr = await call('GET', '/api/v1/loan-requests', decideKey);
+    eq(lr.status, 200);
+    const req1 = lr.json.data.find((x: any) => x.prepared_by === 'Ayo Grains Ltd');
+    ok(req1 && req1.receipts[0].issuer === 'Ayo Grains Ltd' && req1.receipts[0].value_at_storage.kobo > 0, JSON.stringify(lr.json).slice(0, 300));
+    const amount = Math.floor(req1.requested_kobo / 100) * 100;
+    const d1 = await call('POST', `/api/v1/loan-requests/${req1.id}/decision`, decideKey, { approve: true, amount_kobo: amount, note: 'Within policy' }, { 'Idempotency-Key': 'decide-0001' });
+    eq(d1.status, 200, JSON.stringify(d1.json)); issLoan = d1.json.loan_no; ok(issLoan);
+    const d2 = await call('POST', `/api/v1/loan-requests/${req1.id}/decision`, decideKey, { approve: true, amount_kobo: amount, note: 'Within policy' }, { 'Idempotency-Key': 'decide-0001' });
+    eq(d2.status, 200); eq(d2.json.loan_no, issLoan); eq(d2.headers.get('idempotent-replayed'), 'true');
+    eq((await call('POST', `/api/v1/loan-requests/${req1.id}/decision`, decideKey, { approve: false, note: 'x' }, { 'Idempotency-Key': 'decide-0001' })).status, 422);
+    eq((await call('POST', `/api/v1/loan-requests/${req1.id}/decision`, decideKey, { approve: true })).status, 400, 'already decided');
+    eq((await call('POST', `/api/v1/loans/${issLoan}/allocations`, decideKey, { allocations: [{ user_ref: '+2348031234567', amount_kobo: 100 }] })).status, 400);
+    eq((await call('POST', `/api/v1/loans/${issLoan}/allocations`, decideKey, { allocations: [{ user_ref: 'usr_a', amount_kobo: amount + 1 }] })).status, 400, 'more than the loan');
+    const half = Math.floor(amount / 2);
+    const al = await call('POST', `/api/v1/loans/${issLoan}/allocations`, decideKey, { allocations: [{ user_ref: 'usr_8f2a1', amount_kobo: half }, { user_ref: 'usr_c41d9', amount_kobo: amount - half }] });
+    eq(al.status, 200); eq(al.json.unallocated_kobo, 0);
+    const bad = await call('POST', `/api/v1/loans/${issLoan}/disbursement`, decideKey, { reference: 'FT-API-0001' });
+    eq(bad.status, 403, 'the approving key has no payout permission');
+    // Level 2 identity: the lender confirms the farmer's account first (the product asks for it).
+    const pay = await call('POST', `/api/v1/loans/${issLoan}/disbursement`, payKey, { reference: 'FT-API-0001' }, { 'Idempotency-Key': 'pay-000001' });
+    eq(pay.status, 200, JSON.stringify(pay.json)); eq(pay.json.status, 'disbursed');
+    eq(pay.json.allocations.length, 2);
+    const ch = await db.get<any>(`SELECT amount_kobo::float AS a, org_id FROM platform_charges WHERE kind='origination' AND ref=$1`, issLoan);
+    eq(ch.a, Math.round(amount * 100 / 10_000)); eq(ch.org_id, accionId);
+    const full = await call('GET', `/api/v1/loans/${issLoan}?history=1`, payKey);
+    ok(full.json.value_history.value.length >= 1 && full.json.collateral.receipts[0].receipt_no === issNo);
+  });
+  await t('repayments are shared among the funder’s users; webhooks arrive signed and are retried until accepted', async () => {
+    await F.repay(lfin, issLoan, { amount: '1000', reference: 'RP-API-01' });
+    const sh = await call('GET', `/api/v1/loans/${issLoan}/allocations`, decideKey);
+    eq(sh.json.data.reduce((n: number, x: any) => n + x.repaid_kobo, 0) <= 100000, true);
+    ok(sh.json.data.every((x: any) => x.repaid_kobo > 0), JSON.stringify(sh.json));
+    const r = await WH.deliverDue();
+    ok(r.ok >= 3, JSON.stringify(r));
+    const types = hooks.map((h) => JSON.parse(h.body).type);
+    for (const e of ['loan.approved', 'loan.disbursed', 'loan.repayment']) ok(types.includes(e), `${e} in ${types.join(',')}`);
+    const h = hooks.find((x) => JSON.parse(x.body).type === 'loan.disbursed')!;
+    const sig = String(h.headers['x-storagex-signature']); const t0 = Number(/t=(\d+)/.exec(sig)![1]);
+    eq(sig, WH.signature(whSecret, h.body, t0), 'signature checks with the secret');
+    eq((await WH.deliverDue()).due, 0, 'nothing sent twice');
+    // A partner that is down gets retries, not silence.
+    await WH.emit(accionId, 'test.ping', { n: 1 }, 'retry-test');
+    const down = await WH.deliverDue(async () => ({ status: 503 }));
+    eq(down.failed, 1);
+    eq(await db.val(`SELECT attempts FROM webhook_events WHERE dedupe='test.ping:retry-test'`), 1);
+  });
+  await t('sales, alerts, receipts and issuers over the API; Titan sends WareGuard readings; revoked keys stop', async () => {
+    ok((await call('GET', '/api/v1/alerts', decideKey)).json.data.length >= 1);
+    const rc = await call('GET', `/api/v1/receipts/${issNo}`, decideKey);
+    eq(rc.status, 200); eq(rc.json.pledged.to_you, true); eq(rc.json.issuer, 'Ayo Grains Ltd');
+    eq((await call('GET', `/api/v1/receipts/${issNo}`, payKey)).status, 403);
+    const iss = await call('GET', '/api/v1/issuers', decideKey);
+    eq(iss.json.data[0].your_terms.max_ltv_bp, 4000);
+    eq((await call('GET', '/api/v1/sales?status=cancelled', decideKey)).status, 200);
+    const titan = (await API.createKey(admin, { name: 'Titan', scopes: ['wareguard:write'] })).key;
+    eq((await call('POST', '/api/v1/wareguard/devices', titan, { device_ref: 'WG-API-1', warehouse_code: 'WH-NI-MNA-02', label: 'Bay 5' })).status, 200);
+    const rd = await call('POST', '/api/v1/wareguard/readings', titan, { devices: [{ device_ref: 'WG-API-1', readings: [{ at: new Date().toISOString(), temp_c: 26, rh_pct: 60, door_open: false }] }, { device_ref: 'NOPE', readings: [] }] });
+    eq(rd.status, 200); eq(rd.json.stored, 1); eq(rd.json.unknown_devices, ['NOPE']);
+    eq((await call('POST', '/api/v1/wareguard/readings', decideKey, { device_ref: 'WG-API-1', readings: [] })).status, 403, 'only Titan');
+    const spec = await fetch(base + '/api/v1/openapi.json').then((x) => x.json());
+    ok(Object.keys(spec.paths).length >= 14 && spec.paths['/api/v1/loans/{loan_no}/allocations'].post);
+    const docs = await req('GET', '/developers');
+    eq(docs.status, 200); ok(docs.text.includes('Idempotency-Key') && docs.text.includes('lender of record'));
+    const id = (await db.val<string>('SELECT id FROM api_clients WHERE key_hash=$1', crypto.createHash('sha256').update(payKey).digest('hex')))!;
+    await API.revokeKey(lfin, id);
+    eq((await call('GET', '/api/v1/me', payKey)).status, 401);
+  });
+  await t('a suspended issuer cannot issue; lenders holding its receipts are told', async () => {
+    await IS.suspend(admin, 'AYOG', 'Stock count shortfall under investigation');
+    ok((await AL.alertsFor(officer)).some((x) => x.title.includes('Ayo Grains Ltd is suspended')));
+    const r2 = makeRecord(issClerk);
+    const out = await I.ingest(issClerk, r2.json, r2.files, { deviceClock: new Date().toISOString() });
+    const i0 = (await I.intakeByRef(admin, out.ref))!;
+    if ((i0.flags as any[]).some((f) => f.severity === 'hold')) await I.clearHold(compliance, out.ref, 'Checked with the issuer: a real delivery');
+    await I.reviewIntake(issAdmin, out.ref, 'accept', 'Checked at the gate');
+    ok((await rejects(Rc.issueFromIntake(issAdmin, (await db.val<string>('SELECT id FROM intakes WHERE ref=$1', out.ref))!))).message.includes('suspended'));
+    eq((await Rc.receiptByNo(admin, issNo))!.status, 'financed', 'its receipts stay valid');
+    hookSrv.close();
   });
   await t('lender watch pages: alerts, stock watch, value over time, buyer offers; the dashboard is Kitovu-only', async () => {
     await signInAs(officer);
