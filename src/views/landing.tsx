@@ -17,9 +17,9 @@ export function LandingPage({ c }: { c: Ctx }) {
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>StorageX by Kitovu · Lend against a commodity you can track</title>
-        <meta name="description" content="StorageX turns commodities held in certified Nigerian warehouses into receipts lenders can track at any time: the stock, its value, and whether anyone else has a claim on it." />
+        <meta name="description" content="StorageX turns commodities held in certified warehouses into receipts lenders can track at any time: the stock, its value, and whether anyone else has a claim on it." />
         <meta property="og:title" content="StorageX by Kitovu · Lend against a commodity you can track" />
-        <meta property="og:description" content="Warehouse receipts for commodities in certified Nigerian warehouses, tracked from intake to sale." />
+        <meta property="og:description" content="Warehouse receipts for commodities in certified warehouses, tracked from intake to sale." />
         <meta property="og:image" content={`${site}${asset('/og.png')}`} />
         <meta property="og:url" content={site} />
         <meta name="twitter:card" content="summary_large_image" />
@@ -44,7 +44,7 @@ export function LandingPage({ c }: { c: Ctx }) {
           <section className="hero">
             <div className="hero-copy">
               <h1>Lend against a commodity you can track.</h1>
-              <p className="lead">StorageX turns commodities like maize, soybean, sorghum and paddy rice, held in certified Nigerian warehouses, into receipts. Each one shows, at any moment, whether the stock is still there, what it is worth today, and whether anyone else already has a claim on it.</p>
+              <p className="lead">StorageX turns commodities like maize, soybean, sorghum and paddy rice, held in certified warehouses, into receipts. Each one shows, at any moment, whether the stock is still there, what it is worth today, and whether anyone else already has a claim on it.</p>
               <div className="ctas">
                 <a className="lp-btn big" href="/apply">Apply to partner</a>
                 <a className="lp-link" href="#watch">Watch how it works</a>
