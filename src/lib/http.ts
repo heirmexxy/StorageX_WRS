@@ -62,6 +62,7 @@ export class Ctx {
   }
   get actor(): Actor { if (!this.session) throw new HttpError(401, 'Sign in first.'); return { user: this.session.user, membership: this.session.active, ip: this.ip }; }
 
+  raw = '';
   async readBody() {
     if (this.method !== 'POST') return;
     const type = String(this.req.headers['content-type'] || '');
@@ -79,6 +80,7 @@ export class Ctx {
       return;
     }
     const raw = buf.toString('utf8');
+    this.raw = raw;   // kept for webhook signature checks
     if (type.startsWith('application/x-www-form-urlencoded')) {
       const p = new URLSearchParams(raw);
       this.body = Object.fromEntries(p);

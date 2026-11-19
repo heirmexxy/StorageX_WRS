@@ -15,6 +15,9 @@ import { act } from './admin';
 import { deliveriesOf } from '../lib/intake';
 import { can } from '../lib/rbac';
 import { creditHistory } from '../lib/credit';
+import * as PS from '../lib/paystack';
+import * as IDC from '../lib/identity';
+import { lastImport } from '../lib/pricefeed';
 import { screenSubmission } from '../lib/agents/kyc-screen';
 import * as S from '../lib/settings';
 import * as N from '../lib/notify';
@@ -25,7 +28,7 @@ const liveStatus = async () => {
   const s = await S.getSettings();
   const w = (await db.get<any>(`SELECT count(*)::int AS devices, count(*) FILTER (WHERE last_seen_at > now() - make_interval(mins => $1::int))::int AS reporting, max(last_seen_at) AS last_at FROM sensor_devices WHERE active`, s['wareguard.offline_minutes']))!;
   const titan = !!(await db.val(`SELECT 1 FROM api_clients k JOIN organisations o ON o.id=k.org_id WHERE o.kind='kitovu' AND k.status='active' AND 'wareguard:write' = ANY(k.scopes)`));
-  return { wareguard: { ...w, titan_key: titan } };
+  return { wareguard: { ...w, titan_key: titan }, feed: await lastImport() };
 };
 import { config } from '../lib/config';
 import { SettingsPage } from '../views/settings';
@@ -61,6 +64,8 @@ async function farmerView(c: Ctx, extra: Partial<FarmerView> = {}) {
     deliveries: c.membership?.org_kind === 'lender' ? [] : await deliveriesOf(f.id),
     messaging: c.membership?.org_kind === 'lender' ? undefined : { msgs: await N.messagesOf(f.id), ussd: await U.ussdStatus(f.id), languages: N.LANGUAGES },
     credit: kit || can(c.membership, 'finance.view') ? await creditHistory(f.id) : undefined,
+    money: kit ? { payout: await PS.recipientOf(f.id), banks: can(c.membership, 'finance.approve') && PS.connected() ? await PS.banks().catch(() => []) : [], checks: await IDC.checksFor(f.id),
+      canPay: can(c.membership, 'finance.approve'), canBvn: can(c.membership, 'kyc.review') && IDC.connected() } : undefined,
     issues: kit && can(c.membership, 'farmers.edit') ? await R.openIssues(c.actor, { entity: 'farmer', entityId: f.id, includeInfo: true, includeResolved: true }) : [],
     ...extra,
   };

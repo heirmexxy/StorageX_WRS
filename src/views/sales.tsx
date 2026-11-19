@@ -42,7 +42,7 @@ export function SalesPage({ c, rows, buyers }: { c: Ctx; rows: any[]; buyers: { 
   );
 }
 
-export function SalePage({ c, s }: { c: Ctx; s: any }) {
+export function SalePage({ c, s, pay }: { c: Ctx; s: any; pay?: { connected: boolean; payouts: any[]; links: any[] } }) {
   const isLender = c.membership?.org_kind === 'lender';
   return (
     <Page c={c} title={s.ref}>
@@ -110,10 +110,27 @@ export function SalePage({ c, s }: { c: Ctx; s: any }) {
             <thead><tr><th>Receipt</th><th>To</th><th>For</th><th>Amount</th><th>Paid out</th></tr></thead>
             <tbody>{s.settlement.lines.filter((l: any) => !isLender || l.org_id === c.membership?.org_id).map((l: any) => (
               <tr key={l.id}><td className="mono">{l.receipt_no}</td><td>{l.party === 'kitovu' ? 'Kitovu' : l.party === 'lender' ? l.org_name : l.farmer_name}</td><td>{l.label}</td><td>{N(l.amount)}</td>
-                <td>{l.party === 'kitovu' ? '—' : l.paid_at ? `${l.paid_ref} · ${fmtDay(l.paid_at)}` : fin(c) && l.amount > 0 ? <form method="post" action={`/settlements/lines/${l.id}/paid`} className="row"><Csrf c={c} /><input name="reference" placeholder="Transfer reference" aria-label="Reference" required /><button>Mark paid</button></form> : l.amount > 0 ? 'to pay' : '—'}</td></tr>
+                <td>{l.party === 'kitovu' ? '—' : l.paid_at ? `${l.paid_ref} · ${fmtDay(l.paid_at)}` : fin(c) && l.amount > 0 ? (() => {
+                  const po = pay?.payouts.find((p) => p.line_id === l.id);
+                  if (po && po.status === 'requested') return <>{`Payout to ${po.bank_name} …${po.account_last4}, asked by ${po.requested_name}`}{po.failure_reason ? <><br /><small className="bad">{po.failure_reason}</small></> : null}<form method="post" action={`/payouts/${po.id}/approve`}><Csrf c={c} /><button className="primary">Approve and send</button></form></>;
+                  if (po && po.status === 'sent') return `Sent to ${po.bank_name} …${po.account_last4}; waiting for the bank`;
+                  return <>{po && ['failed', 'reversed'].includes(po.status) && <small className="bad">{`Last payout ${po.status}: ${po.failure_reason ?? ''}`}<br /></small>}
+                    {l.party === 'farmer' && pay?.connected && <form method="post" action={`/settlements/lines/${l.id}/payout`}><Csrf c={c} /><button>Pay by Paystack</button></form>}
+                    <form method="post" action={`/settlements/lines/${l.id}/paid`} className="row"><Csrf c={c} /><input name="reference" placeholder="Transfer reference" aria-label="Reference" required /><button>Mark paid</button></form></>;
+                })() : l.amount > 0 ? 'to pay' : '—'}</td></tr>
             ))}</tbody>
           </table>
           {!isLender && s.settlement.totals.shortfall > 0 && <p className="flash error">{`Proceeds did not cover the loans: ${N(s.settlement.totals.shortfall)} is still owed to the lender.`}</p>}
+        </section>
+      )}
+      {pay && fin(c) && s.status === 'approved' && s.money.due > 0 && (
+        <section className="card">
+          <h2>Buyer payment link</h2>
+          {pay.connected ? <>
+            <p className="muted">{`A Paystack link for the ${N(s.money.due)} still due. When the buyer pays, the payment is recorded and matched to this sale.`}</p>
+            {pay.links.filter((l) => l.status === 'open').map((l) => <p key={l.id}><a href={l.url}>{l.url}</a>{` (${N(l.amount)}, sent to ${l.email})`}</p>)}
+            <form method="post" action={`/sales/${s.ref}/payment-link`} className="row"><Csrf c={c} /><input name="email" type="email" placeholder="Buyer’s email" aria-label="Buyer’s email" required /><button>Make a payment link</button></form>
+          </> : <p className="muted">Paystack is not connected; the buyer pays by bank transfer quoting the sale reference.</p>}
         </section>
       )}
       {ops(c) && ['proposed', 'approved'].includes(s.status) && (

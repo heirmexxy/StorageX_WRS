@@ -100,6 +100,12 @@ async function main() {
       if (r.due) console.log(`${new Date().toISOString()} webhooks: ${r.ok} delivered, ${r.failed} to retry`);
       break;
     }
+    case 'price-feed': {
+      const { importFeed } = await import('./lib/pricefeed');
+      const r = await importFeed();
+      console.log(`${new Date().toISOString()} price feed: ${r.error ?? `${r.added} new prices waiting for approval, ${r.skipped} skipped`}`);
+      break;
+    }
     case 'wareguard-sweep': {
       const { sweepOffline } = await import('./lib/wareguard');
       const n = await sweepOffline();

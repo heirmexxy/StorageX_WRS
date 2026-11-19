@@ -24,8 +24,27 @@ function devOnly(to: string, text: string, channel: 'sms' | 'voice'): Result {
   return { ok: true };
 }
 
+/** Africa's Talking bulk SMS (the same company as the USSD gateway). */
+async function africasTalking(to: string, text: string): Promise<Result> {
+  try {
+    const body = new URLSearchParams({ username: config.atUsername, to, message: text, ...(config.atSender ? { from: config.atSender } : {}) });
+    const host = config.atUsername === 'sandbox' ? 'https://api.sandbox.africastalking.com' : 'https://api.africastalking.com';
+    const r = await fetch(`${host}/version1/messaging`, {
+      method: 'POST', signal: AbortSignal.timeout(10_000), body,
+      headers: { apiKey: config.atApiKey, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+    if (!r.ok) return { ok: false, error: `Africa's Talking ${r.status}` };
+    const j: any = await r.json().catch(() => ({}));
+    const rec = j?.SMSMessageData?.Recipients?.[0];
+    if (rec && !/success/i.test(String(rec.status))) return { ok: false, error: `Africa's Talking: ${rec.status}` };
+    return { ok: true };
+  } catch (e: any) { return { ok: false, error: e?.message || 'network error' }; }
+}
+export const smsConnected = () => (config.smsProvider === 'africastalking' ? !!(config.atApiKey && config.atUsername) : !!config.termiiKey);
+
 export async function sendSms(to: string, text: string): Promise<Result> {
   if (!/^\+[1-9]\d{7,14}$/.test(to)) return { ok: false, error: 'bad number' };
+  if (config.smsProvider === 'africastalking' && config.atApiKey && config.atUsername) return africasTalking(to, text);
   if (!config.termiiKey) return devOnly(to, text, 'sms');
   return termii('/api/sms/send', { to: to.slice(1), from: config.termiiSender, sms: text, type: 'plain', channel: config.termiiChannel });
 }

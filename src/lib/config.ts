@@ -25,6 +25,23 @@ export const config = {
   // 'dnd' reaches numbers on the Do-Not-Disturb list (most OTPs need it); 'generic' does not.
   termiiChannel: env('TERMII_CHANNEL', 'dnd'),
   termiiVoicePath: env('TERMII_VOICE_PATH', '/api/sms/otp/call'),
+  // Which SMS provider sends texts: 'termii' (default) or 'africastalking'.
+  smsProvider: env('SMS_PROVIDER', 'termii'),
+  atUsername: env('AT_USERNAME'),
+  atApiKey: env('AT_API_KEY'),
+  atSender: env('AT_SENDER_ID'),
+  // Incoming texts (farmers texting BAL, KUDI, OWO or EGO) arrive at /sms/inbound?key=<this>.
+  smsInboundKey: env('SMS_INBOUND_KEY'),
+  // Paystack: farmer payouts and buyer payment links. Its webhook is /hooks/paystack.
+  paystackSecret: env('PAYSTACK_SECRET_KEY'),
+  paystackBase: env('PAYSTACK_BASE', 'https://api.paystack.co'),
+  // Licensed identity provider for BVN and NIN lookups ('dojah'), with its keys.
+  dojahAppId: env('DOJAH_APP_ID'),
+  dojahSecret: env('DOJAH_SECRET_KEY'),
+  dojahBase: env('DOJAH_BASE', 'https://api.dojah.io'),
+  // Live price feed: a JSON address read each morning (see docs/connections.md for the format).
+  priceFeedUrl: env('PRICE_FEED_URL'),
+  priceFeedToken: env('PRICE_FEED_TOKEN'),
   // USSD gateway (Africa's Talking format). The gateway calls /ussd/at?key=<this>; without it USSD is off in production.
   ussdKey: env('USSD_KEY'),
   // AI pre-check of identity submissions. 'assist' = findings shown to the human reviewer; 'off' = none.

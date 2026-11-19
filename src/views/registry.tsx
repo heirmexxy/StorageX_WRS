@@ -96,6 +96,7 @@ export interface FarmerView {
   deliveries: any[];
   messaging?: { msgs: any[]; ussd: any; languages: Record<string, string> };
   credit?: any;
+  money?: { payout: any; banks: { name: string; code: string }[]; checks: any[]; canPay: boolean; canBvn: boolean };
 }
 
 export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
@@ -253,6 +254,24 @@ export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
         </section>
       )}
 
+      {v.money && (v.money.canPay || v.money.canBvn || v.money.payout || v.money.checks.length > 0) && (
+        <section className="card">
+          <h2>Payout account and identity checks</h2>
+          <p>{v.money.payout ? `Payouts go to ${v.money.payout.bank_name} …${v.money.payout.account_last4} (${v.money.payout.account_name})${v.money.payout.name_match === 'override' ? `; name differs: ${v.money.payout.override_note}` : ''}.` : 'No payout account saved.'}</p>
+          {v.money.canPay && v.money.banks.length > 0 && (
+            <form method="post" action={`/farmers/${v.f.code}/payout-account`} className="inline-form"><Csrf c={c} />
+              <label className="field"><span>Bank</span><select name="bank_code" required><option value="">Choose…</option>{v.money.banks.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}</select></label>
+              <label className="field"><span>Account number (checked with the bank, not kept)</span><input name="account_number" inputMode="numeric" pattern="[0-9]{10}" required /></label>
+              <label className="field"><span>Note, only if the bank’s name differs</span><input name="override_note" /></label>
+              <button>{v.money.payout ? 'Replace account' : 'Save account'}</button>
+            </form>
+          )}
+          {v.money.checks.length > 0 && <ul>{v.money.checks.map((k: any, i: number) => <li key={i}>{`${k.kind.toUpperCase()} …${k.last4}: ${k.result.replace('_', ' ')} (${k.provider}, ${fmtDay(k.checked_at)}, ${k.checked_by})`}</li>)}</ul>}
+          {v.money.canBvn && (
+            <form method="post" action={`/farmers/${v.f.code}/bvn-check`} className="row"><Csrf c={c} /><input name="bvn" inputMode="numeric" pattern="[0-9]{11}" placeholder="BVN (11 digits, not kept)" aria-label="BVN" required /><button>Check BVN</button></form>
+          )}
+        </section>
+      )}
       {v.credit && (
         <section className="card">
           <h2>Credit history</h2>

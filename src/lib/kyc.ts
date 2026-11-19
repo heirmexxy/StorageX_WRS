@@ -16,6 +16,7 @@ import { farmerByCode, NotAllowed, type Farmer } from './registry';
 import { hashIdNumber, clean, normPhone } from './util';
 import { getSettings } from './settings';
 import { latestCheck } from './agents/kyc-screen';
+import { lookupNin } from './identity';
 import type { Upload } from './http';
 
 export const ID_TYPES: Record<string, { label: string; re: RegExp; hint: string }> = {
@@ -31,6 +32,7 @@ export interface LookupResult { provider: string; ref: string; match: 'match' | 
 interface Provider { name: string; lookup(idType: string, idNumber: string, f: Farmer): Promise<LookupResult | null> }
 const providers: Record<string, Provider> = {
   none: { name: 'none', lookup: async () => null },
+  dojah: { name: 'dojah', lookup: async (idType, num, f) => (idType === 'nin' ? lookupNin(num, f.full_name) : null) },
   // smile_id / dojah / youverify: add here once a provider is chosen and contracted. Store their reference and
   // a summary of the match only; never the returned photo or full record.
 };

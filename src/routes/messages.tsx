@@ -2,6 +2,10 @@ import { get, post } from '../lib/router';
 import { HttpError } from '../lib/http';
 import { db } from '../lib/db';
 import { config } from '../lib/config';
+import { smsKeyword } from '../lib/agents/farmer-helper';
+import { sendSms } from '../lib/sms';
+import { rateLimit } from '../lib/auth';
+import { normPhone } from '../lib/util';
 import { safeEqual } from '../lib/util';
 import { getSettings } from '../lib/settings';
 import * as N from '../lib/notify';
@@ -18,6 +22,23 @@ post('/ussd/at', 'webhook', async (c) => {
   if (config.ussdKey && !safeEqual(key, config.ussdKey)) throw new HttpError(403, 'Forbidden.');
   try { c.text(await U.ussd(c.body)); }
   catch (e) { console.error('[ussd]', e); c.text('END Sorry, StorageX could not answer. Please try again later.'); }
+});
+
+// Incoming texts (Africa's Talking: from/text; Termii: sender/message). Farmers text BAL, KUDI, OWO or EGO and get
+// what their produce is worth and what they owe, in their approved language. Anything else is ignored.
+post('/sms/inbound', 'webhook', async (c) => {
+  const key = c.url.searchParams.get('key') ?? '';
+  if (!config.smsInboundKey) throw new HttpError(503, 'Incoming texts are not set up on this server.');
+  if (!safeEqual(key, config.smsInboundKey)) throw new HttpError(403, 'Forbidden.');
+  const b = c.body as any;
+  const from = String(b.from ?? b.sender ?? b.msisdn ?? ''), text = String(b.text ?? b.message ?? b.sms ?? '');
+  try {
+    if (await rateLimit(`smsin:${from}`, 5, 3600)) {
+      const reply = await smsKeyword(from, text);
+      if (reply) await sendSms(normPhone(from)!, reply);
+    }
+  } catch (e) { console.error('[sms inbound]', e); }
+  c.text('OK');
 });
 
 const kitovuOnly = (c: any) => { if (c.membership?.org_kind !== 'kitovu') throw new HttpError(403, 'Kitovu staff only.'); };

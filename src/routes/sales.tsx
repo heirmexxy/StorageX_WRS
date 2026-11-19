@@ -4,6 +4,7 @@ import { db } from '../lib/db';
 import * as S from '../lib/settlement';
 import { farmerByCode } from '../lib/registry';
 import { render } from '../views/layout';
+import * as PS from '../lib/paystack';
 import { SalesPage, SalePage, CollectionsPage, StatementPage } from '../views/sales';
 import { act } from './admin';
 import { UserError } from '../lib/errors';
@@ -17,7 +18,8 @@ post('/sales', 'perm:receipts.issue', async (c) => {
 get('/sales/:ref', 'perm:receipts.view', async (c) => {
   const s = await S.saleView(c.actor, c.params.ref);
   if (!s) throw new HttpError(404, 'No such sale.');
-  c.html(render(<SalePage c={c} s={s} />));
+  const kit = c.membership?.org_kind === 'kitovu';
+  c.html(render(<SalePage c={c} s={s} pay={kit ? { connected: PS.connected(), payouts: await PS.payoutsFor(s.id), links: await PS.linksFor(s.id) } : undefined} />));
 });
 const saleId = async (ref: string) => { const id = await db.val<string>('SELECT id FROM sales WHERE ref=upper($1)', ref); if (!id) throw new UserError('No such sale.'); return id; };
 const backToSale = async (itemId: string) => `/sales/${(await db.val<string>('SELECT s.ref FROM sale_items x JOIN sales s ON s.id=x.sale_id WHERE x.id=$1', itemId)) ?? ''}`;
@@ -27,6 +29,15 @@ post('/sales/items/:id/lender-approve', 'perm:finance.approve', async (c) => act
 post('/sales/:ref/deliver', 'perm:receipts.issue', (c) => act(c, `/sales/${c.params.ref}`, async () => `Delivery ordered: ${(await S.orderDelivery(c.actor, await saleId(c.params.ref), c.body.collector, c.body.phone)).join(', ')}.`));
 post('/sales/:ref/settle', 'perm:finance.approve', (c) => act(c, `/sales/${c.params.ref}`, async () => { const t = await S.settle(c.actor, await saleId(c.params.ref)); return `Settled: ₦${(t.farmer / 100).toLocaleString('en-NG')} to farmers, ₦${(t.lender / 100).toLocaleString('en-NG')} to lenders, ₦${(t.kitovu / 100).toLocaleString('en-NG')} Kitovu fees. Now record the payouts.`; }));
 post('/sales/:ref/cancel', 'perm:receipts.issue', (c) => act(c, `/sales/${c.params.ref}`, async () => { await S.cancelSale(c.actor, await saleId(c.params.ref), c.body.reason); return 'Sale cancelled; receipts restored.'; }));
+post('/sales/:ref/payment-link', 'perm:finance.approve', (c) => act(c, `/sales/${c.params.ref}`, async () => { const l = await PS.paymentLink(c.actor, c.params.ref, c.body.email); return `Payment link made for ₦${(l.amount / 100).toLocaleString('en-NG')}: send it to the buyer. Payment is recorded and matched when the buyer pays.`; }));
+post('/settlements/lines/:id/payout', 'perm:finance.approve', async (c) => {
+  const ref = await db.val<string>('SELECT s.ref FROM settlement_lines sl JOIN settlements st ON st.id=sl.settlement_id JOIN sales s ON s.id=st.sale_id WHERE sl.id=$1', c.params.id);
+  return act(c, `/sales/${ref ?? ''}`, async () => { await PS.requestPayout(c.actor, c.params.id); return 'Payout requested. Someone else in finance approves it to send.'; });
+});
+post('/payouts/:id/approve', 'perm:finance.approve', async (c) => {
+  const ref = await db.val<string>('SELECT s.ref FROM payouts p JOIN settlement_lines sl ON sl.id=p.line_id JOIN settlements st ON st.id=sl.settlement_id JOIN sales s ON s.id=st.sale_id WHERE p.id=$1', c.params.id);
+  return act(c, `/sales/${ref ?? ''}`, async () => { await PS.approvePayout(c.actor, c.params.id); return 'Sent to Paystack. The line is marked paid when the bank confirms.'; });
+});
 post('/settlements/lines/:id/paid', 'perm:finance.approve', async (c) => {
   const ref = await db.val<string>('SELECT s.ref FROM settlement_lines sl JOIN settlements st ON st.id=sl.settlement_id JOIN sales s ON s.id=st.sale_id WHERE sl.id=$1', c.params.id);
   return act(c, `/sales/${ref ?? ''}`, async () => { await S.markPaid(c.actor, c.params.id, c.body.reference); return 'Payout recorded.'; });

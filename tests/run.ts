@@ -1599,6 +1599,111 @@ async function main() {
     ok(sw.text.includes('WareGuard devices') && sw.text.includes('WG-API-1'));
     delete jar.sx_sid;
   });
+  console.log('\nBuild 14: outside services (with the providers stood in by test doubles)');
+  const { config: CFG } = await import('../src/lib/config');
+  await t('incoming texts: a farmer texting KUDI gets the balance back; strangers and other words get nothing', async () => {
+    CFG.smsInboundKey = 'inbound-test-key-123';
+    const n0 = sentForTests.length;
+    const r1 = await fetch(`${base}/sms/inbound?key=wrong`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'from=%2B2348000000000&text=BAL' });
+    eq(r1.status, 403);
+    const r2 = await fetch(`${base}/sms/inbound?key=inbound-test-key-123`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ from: adaRow.phone_e164, text: 'kudi' }).toString() });
+    eq(r2.status, 200);
+    ok(sentForTests.length === n0 + 1 && sentForTests.at(-1)!.text.startsWith('StorageX:'), JSON.stringify(sentForTests.at(-1)));
+    await fetch(`${base}/sms/inbound?key=inbound-test-key-123`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ from: adaRow.phone_e164, text: 'hello' }).toString() });
+    eq(sentForTests.length, n0 + 1, 'other words are ignored');
+    CFG.smsInboundKey = '';
+  });
+  await t('identity provider: NIN and BVN are matched by name; only the result and last four digits are kept', async () => {
+    const IDN = await import('../src/lib/identity');
+    eq(IDN.compareNames('Ada Okafor', { first: 'ADA', last: 'OKAFOR' }), 'match');
+    eq(IDN.compareNames('Ada Okafor', { first: 'Adaeze', last: 'Okafor' }), 'partial');
+    eq(IDN.compareNames('Ada Okafor', { first: 'John', last: 'Bello' }), 'no_match');
+    await rejects(IDN.bvnCheck(compliance, ada, '22222222222'));   // not connected yet
+    CFG.dojahAppId = 'app'; CFG.dojahSecret = 'secret';
+    const fake = async (url: string) => ({ status: 200, json: async () => ({ entity: { first_name: 'ADA', last_name: 'OKAFOR', date_of_birth: '1990-01-01' }, reference_id: 'dj-1', url }) });
+    await rejects(IDN.bvnCheck(officer, ada, '22222222222', fake as any));
+    eq(await IDN.bvnCheck(compliance, ada, '222-2222-2229', fake as any), 'match');
+    const row = await db.get<any>(`SELECT * FROM identity_checks ORDER BY checked_at DESC LIMIT 1`);
+    eq(row.last4, '2229'); ok(!JSON.stringify(row).includes('22222222229') && !JSON.stringify(row).includes('1990'), 'no number, no record');
+    const nf = async () => ({ status: 404, json: async () => ({}) });
+    eq(await IDN.bvnCheck(compliance, ada, '33333333333', nf as any), 'not_found');
+    eq((await IDN.lookupNin('12345678901', 'Ada Okafor', fake as any))!.match, 'match');
+    CFG.dojahAppId = ''; CFG.dojahSecret = '';
+  });
+  await t('Paystack: the bank account is checked and only its last four digits kept; payouts need two people; the webhook marks them paid', async () => {
+    const PS = await import('../src/lib/paystack');
+    CFG.paystackSecret = 'sk_test_fake';
+    const calls: { url: string; body: any }[] = [];
+    PS.setTransport(async (url: string, init: any) => {
+      const body = init?.body ? JSON.parse(init.body) : null; calls.push({ url, body });
+      const j = (d: any) => ({ status: 200, json: async () => ({ status: true, data: d }) });
+      if (url.includes('/bank/resolve')) return j({ account_name: 'OKAFOR ADA', account_number: '0123456789' });
+      if (url.includes('/bank?')) return j([{ name: 'Test Bank', code: '999' }]);
+      if (url.endsWith('/transferrecipient')) return j({ recipient_code: 'RCP_test1' });
+      if (url.endsWith('/transfer')) return j({ status: 'pending', transfer_code: 'TRF_test1' });
+      if (url.endsWith('/transaction/initialize')) return j({ authorization_url: 'https://checkout.paystack.test/abc', reference: body.reference });
+      return { status: 404, json: async () => ({ status: false, message: 'no' }) };
+    });
+    await rejects(PS.saveRecipient(kfin, ada, { bank_code: '999', account_number: '12345' }));
+    const r = await PS.saveRecipient(kfin, ada, { bank_code: '999', account_number: '0123456789' });
+    eq(r.match, 'match');
+    const rec = await db.get<any>(`SELECT * FROM payout_recipients WHERE status='active' ORDER BY created_at DESC LIMIT 1`);
+    eq(rec.account_last4, '6789'); eq(rec.recipient_code, 'RCP_test1');
+    eq(await db.val(`SELECT count(*)::int FROM payout_recipients WHERE row_to_json(payout_recipients)::text LIKE '%0123456789%'`), 0, 'account number not kept');
+    // A farmer line to pay (the earlier test paid it by hand; open it again for this test).
+    const line = (await db.get<any>(`SELECT sl.id FROM settlement_lines sl JOIN farmers f ON f.id=sl.farmer_id WHERE sl.party='farmer' AND sl.amount_kobo > 0 AND f.code=$1 LIMIT 1`, ada))!;
+    await db.run('UPDATE settlement_lines SET paid_at=NULL, paid_ref=NULL, paid_by=NULL WHERE id=$1', line.id);
+    await PS.requestPayout(kfin, line.id);
+    const p = (await db.get<any>('SELECT * FROM payouts WHERE line_id=$1', line.id))!;
+    await rejects(PS.approvePayout(kfin, p.id));
+    await PS.approvePayout(admin, p.id);
+    eq((await db.get<any>('SELECT status, transfer_code FROM payouts WHERE id=$1', p.id)).status, 'sent');
+    eq(calls.find((x) => x.url.endsWith('/transfer'))!.body.recipient, 'RCP_test1');
+    // Paystack calls back: unsigned is refused; signed marks the line paid, once.
+    const ev = JSON.stringify({ event: 'transfer.success', data: { reference: p.reference, amount: Number(p.amount_kobo) } });
+    eq((await fetch(`${base}/hooks/paystack`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-paystack-signature': 'nope' }, body: ev })).status, 401);
+    const sig = crypto.createHmac('sha512', 'sk_test_fake').update(ev).digest('hex');
+    eq((await fetch(`${base}/hooks/paystack`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-paystack-signature': sig }, body: ev })).status, 200);
+    eq((await fetch(`${base}/hooks/paystack`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-paystack-signature': sig }, body: ev })).status, 200, 'repeat is harmless');
+    const sl = await db.get<any>('SELECT paid_at, paid_ref FROM settlement_lines WHERE id=$1', line.id);
+    ok(sl.paid_at && sl.paid_ref === p.reference);
+    eq((await db.get<any>('SELECT status FROM payouts WHERE id=$1', p.id)).status, 'succeeded');
+  });
+  await t('Paystack: a buyer pays a sale by link; the webhook records and matches the payment', async () => {
+    const PS = await import('../src/lib/paystack');
+    const s1 = await SL.proposeSale(ops, { buyer: 'Sahel Mills Ltd', price: '640', receipts: watchNo });
+    await rejects(PS.paymentLink(kfin, s1.ref, 'buyer@sahel.test'));
+    await db.run(`UPDATE sales SET status='approved' WHERE id=$1`, s1.id);   // the agreements are covered by earlier tests
+    await rejects(PS.paymentLink(kfin, s1.ref, 'not-an-email'));
+    const l = await PS.paymentLink(kfin, s1.ref, 'buyer@sahel.test');
+    ok(l.url.startsWith('https://checkout.paystack.test') && l.reference === `${s1.ref}-P1`);
+    const ev = JSON.stringify({ event: 'charge.success', data: { reference: l.reference, amount: l.amount, paid_at: new Date().toISOString() } });
+    const sig = crypto.createHmac('sha512', 'sk_test_fake').update(ev).digest('hex');
+    eq((await fetch(`${base}/hooks/paystack`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-paystack-signature': sig }, body: ev })).status, 200);
+    const m = await SL.saleMoney(s1.id);
+    eq(m.due, 0, 'fully paid and matched');
+    eq((await db.get<any>(`SELECT status FROM payment_links WHERE reference=$1`, l.reference)).status, 'paid');
+    CFG.paystackSecret = '';
+  });
+  await t('live price feed: good rows become pending prices for a person to approve; bad rows are skipped; reading twice adds nothing', async () => {
+    const PF = await import('../src/lib/pricefeed');
+    eq((await PF.importFeed()).error, 'not configured');
+    CFG.priceFeedUrl = 'https://feed.test/prices';
+    const today = new Date().toISOString().slice(0, 10);
+    const feed = async () => ({ status: 200, json: async () => ({ prices: [
+      { commodity_code: 'MAZ', state_code: 'NI', market: 'Kure market', observed_on: today, naira_per_kg: 655 },
+      { commodity_code: 'SBN', state_code: null, market: 'National', observed_on: today, kobo_per_kg: 72000 },
+      { commodity_code: 'XXX', market: 'Bad', observed_on: today, naira_per_kg: 10 },
+      { commodity_code: 'MAZ', state_code: 'NI', market: 'Old', observed_on: '2020-01-01', naira_per_kg: 100 },
+    ] }) });
+    const r = await PF.importFeed(feed as any);
+    eq([r.added, r.skipped], [2, 2]);
+    eq((await PF.importFeed(feed as any)).added, 0, 'no duplicates');
+    const row = await db.get<any>(`SELECT status, entered_by FROM price_observations WHERE market='Kure market' AND note LIKE 'feed:%'`);
+    eq(row.status, 'pending', 'a person approves it');
+    eq((await PF.importFeed(async () => ({ status: 500, json: async () => ({}) }) as any)).error, 'HTTP 500');
+    CFG.priceFeedUrl = '';
+  });
   await t('lender watch pages: alerts, stock watch, value over time, buyer offers; the dashboard is Kitovu-only', async () => {
     await signInAs(officer);
     const tw = await req('GET', '/tower'); ok(tw.text.includes('Your book: stock value and what is owed') && tw.text.includes('<svg'), 'book chart on the tower');

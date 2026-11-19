@@ -28,6 +28,7 @@ import './routes/offers';
 import './routes/issuers';
 import './routes/api';
 import './routes/developers';
+import './routes/connections';
 
 const CSP = ["default-src 'self'", "img-src 'self' data:", "style-src 'self'", "script-src 'self'", "form-action 'self'", "frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'"].join('; ');
 const STATIC: Record<string, string> = {
