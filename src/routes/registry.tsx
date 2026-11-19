@@ -24,11 +24,13 @@ import * as N from '../lib/notify';
 import * as U from '../lib/ussd';
 import * as DS from '../lib/agents/data-steward';
 import { integrations } from '../lib/integrations';
+import * as TT from '../lib/titan';
 const liveStatus = async () => {
   const s = await S.getSettings();
   const w = (await db.get<any>(`SELECT count(*)::int AS devices, count(*) FILTER (WHERE last_seen_at > now() - make_interval(mins => $1::int))::int AS reporting, max(last_seen_at) AS last_at FROM sensor_devices WHERE active`, s['wareguard.offline_minutes']))!;
-  const titan = !!(await db.val(`SELECT 1 FROM api_clients k JOIN organisations o ON o.id=k.org_id WHERE o.kind='kitovu' AND k.status='active' AND 'wareguard:write' = ANY(k.scopes)`));
-  return { wareguard: { ...w, titan_key: titan }, feed: await lastImport() };
+  const titan = TT.connected() || !!(await db.val(`SELECT 1 FROM api_clients k JOIN organisations o ON o.id=k.org_id WHERE o.kind='kitovu' AND k.status='active' AND 'wareguard:write' = ANY(k.scopes)`));
+  const st = await TT.status();
+  return { wareguard: { ...w, titan_key: titan }, titan: st ? { webhook: st.has_secret, last_sync_at: st.last_sync_at, last_result: st.last_result } : null, feed: await lastImport() };
 };
 import { config } from '../lib/config';
 import { SettingsPage } from '../views/settings';
@@ -167,7 +169,8 @@ get('/warehouses/:code', 'perm:warehouses.view', async (c) => {
   if (!w) throw new HttpError(404, 'No warehouse with that code.');
   const kit = c.membership?.org_kind === 'kitovu' && can(c.membership, 'warehouses.edit');
   const issues = kit ? await R.openIssues(c.actor, { entity: 'warehouse', entityId: w.id, includeInfo: true, includeResolved: true }) : [];
-  c.html(render(<WarehousePage c={c} w={w} policies={await R.policiesFor(w.id)} issues={issues} />));
+  const titanSites = kit && TT.connected() ? await TT.sites().catch(() => null) : undefined;
+  c.html(render(<WarehousePage c={c} w={w} policies={await R.policiesFor(w.id)} issues={issues} titanSites={titanSites} />));
 });
 post('/warehouses/:code', 'perm:warehouses.edit', (c) => act(c, `/warehouses/${c.params.code}`, async () => { await R.updateWarehouse(c.actor, c.params.code, c.body); return 'Saved.'; }));
 post('/warehouses/:code/insurance', 'perm:warehouses.edit', (c) => act(c, `/warehouses/${c.params.code}`, async () => { await R.addPolicy(c.actor, c.params.code, c.body); return 'Policy added. A colleague must verify it.'; }));

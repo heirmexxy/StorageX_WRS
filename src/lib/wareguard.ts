@@ -95,6 +95,11 @@ export async function evaluate(deviceId: string, now = new Date()) {
   await setCondition(d.warehouse_id, d.id, d.label, 'offline', false, now, null, s['wareguard.offline_minutes'], now);
 }
 
+/** An alert Titan raised (tamper, intruder, power lost, sensor fault): opened or closed here with the same advice and telling. */
+export async function externalCondition(whId: string, deviceId: string | null, deviceLabel: string | null, kind: SensorKind, on: boolean, startedAt: Date, now = new Date()) {
+  return setCondition(whId, deviceId, deviceLabel, kind, on, startedAt, null, 0, now);
+}
+
 /** Every few minutes once Titan is connected: devices that have gone quiet. */
 export async function sweepOffline(now = new Date()) {
   const s = await getSettings();

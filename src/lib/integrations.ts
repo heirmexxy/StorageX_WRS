@@ -18,7 +18,7 @@ function newestBackup() {
 }
 function offsiteAt() { try { return fs.statSync(path.join(config.backupDir, '.offsite-ok')).mtimeMs; } catch { return null; } }
 
-export interface Live { wareguard: { devices: number; reporting: number; last_at: Date | null; titan_key: boolean }; feed?: { at: Date; data: any } | null }
+export interface Live { wareguard: { devices: number; reporting: number; last_at: Date | null; titan_key: boolean }; titan?: { webhook: boolean; last_sync_at: Date | null; last_result: any } | null; feed?: { at: Date; data: any } | null }
 
 export function integrations(s: Settings, live?: Live): Integration[] {
   const local = /localhost|127\.0\.0\.1|example|placeholder/.test(config.baseUrl);
@@ -37,9 +37,11 @@ export function integrations(s: Settings, live?: Live): Integration[] {
       affects: 'Farmers checking produce, loans, sales and prices by USSD.' },
     (() => { const w = live?.wareguard; const fresh = !!w?.last_at && Date.now() - new Date(w.last_at).getTime() < 3 * 3_600_000; return {
       name: 'WareGuard readings (Titan)', state: fresh ? (w!.reporting < w!.devices ? 'warn' : 'ok') : w?.titan_key ? 'warn' : 'off',
-      status: !w?.titan_key ? 'Not connected: no Titan key yet' : !w.devices ? 'Titan key made; no devices sent yet' : `${w.reporting} of ${w.devices} devices reporting; last reading ${w.last_at ? age(new Date(w.last_at).getTime()) : 'never'}`,
+      status: !w?.titan_key ? 'Not connected: no Titan key yet'
+        : `${live?.titan?.webhook ? 'Live updates on' : 'Live updates not set up'}; ${w.devices ? `${w.reporting} of ${w.devices} devices reporting; last reading ${w.last_at ? age(new Date(w.last_at).getTime()) : 'never'}` : 'no devices found yet'}${live?.titan?.last_result?.unmatched?.length ? `; Titan sites not matched to a warehouse: ${live.titan.last_result.unmatched.join(', ')}` : ''}${live?.titan?.last_result?.errors?.length ? `; last fetch: ${live.titan.last_result.errors[0]}` : ''}`,
       affects: 'Warehouse conditions on Stock watch and the dashboard, WareGuard alerts, and the WareGuard rule for receipt issuers.',
-      todo: !w?.titan_key ? 'Create an API key with the wareguard:write permission (API keys, signed in as a Kitovu administrator) and give it to the Titan team with docs/titan.md.' : undefined } as Integration; })(),
+      todo: !w?.titan_key ? 'In Titan’s admin panel make a key with read:readings, read:alerts and manage:webhooks; put it in the server settings as TITAN_API_KEY; then run node dist/cli.mjs titan-connect.'
+        : !live?.titan?.webhook ? 'Run node dist/cli.mjs titan-connect on the server to switch on live updates.' : undefined } as Integration; })(),
     { name: 'Incoming texts', state: config.smsInboundKey ? 'ok' : 'off', status: config.smsInboundKey ? 'Ready at /sms/inbound' : 'Not connected',
       affects: 'Farmers texting BAL, KUDI, OWO or EGO for their balance. The same answer already works on USSD (option 6).',
       todo: config.smsInboundKey ? undefined : 'Set SMS_INBOUND_KEY and point the SMS provider’s incoming-message address to https://<your site>/sms/inbound?key=<that key>.' },

@@ -29,6 +29,8 @@ import * as Tw from '../src/lib/tower';
 import * as N from '../src/lib/notify';
 import * as U from '../src/lib/ussd';
 import * as INS from '../src/lib/agents/intake-inspector';
+import * as TT from '../src/lib/titan';
+import { config as CFG } from '../src/lib/config';
 import * as DS from '../src/lib/agents/data-steward';
 import { csvCell } from '../src/lib/util';
 import { integrations } from '../src/lib/integrations';
@@ -1859,6 +1861,64 @@ async function main() {
     await signInAs(officer);
     eq((await req('GET', `/files/${f2.profile_photo_id}`)).status, 404);
     delete jar.sx_sid;
+  });
+  await t('Titan: StorageX reads WareGuard data with Titan’s key, links sites to warehouses, and takes signed live updates', async () => {
+    eq(TT.toReadings([
+      { device: 'WG-1', metric: 'air.temperature', value: 27, time: '2026-11-19T10:00:00Z', channel: 'z1/a' },
+      { device: 'WG-1', metric: 'air.temperature', value: 29.5, time: '2026-11-19T10:00:00Z', channel: 'z1/b' },
+      { device: 'WG-1', metric: 'air.humidity', value: 71, time: '2026-11-19T10:00:00Z' },
+      { device: 'WG-1', metric: 'security.door', value: 1, time: '2026-11-19T10:00:00Z' },
+      { device: 'WG-1', metric: 'air.humidity', value: 99, time: '2026-11-19T10:00:00Z', quality: 'fault' },
+      { device: 'WG-1', metric: 'produce.moisture', value: 12, time: '2026-11-19T10:00:00Z' },
+    ]), [{ device: 'WG-1', readings: [{ at: '2026-11-19T10:00:00.000Z', temp_c: 29.5, rh_pct: 71, door_open: true }] }]);
+    const calls: string[] = [];
+    const nowIso = new Date(Date.now() - 60_000).toISOString();
+    TT.setTransport(async (url: string, init: any) => {
+      calls.push(`${init.method} ${url.replace(CFG.titanBase, '')}`);
+      ok(init.headers.Authorization === 'Bearer tk_test_key', 'Titan’s key is sent');
+      const body = url.includes('/sites') ? { data: [{ id: 'site-mna', name: 'Minna two', externalRef: 'wh-ni-mna-02' }, { id: 'site-x', name: 'Somewhere else', externalRef: 'WH-XX-NOPE-01' }] }
+        : url.includes('/devices') ? [{ id: 'WG-000777', name: 'Bay 3, east wall', status: 'online' }]
+        : url.includes('/readings') ? { data: [{ device: 'WG-000777', metric: 'air.temperature', value: 26.5, time: nowIso }, { device: 'WG-000777', metric: 'air.humidity', value: 60, time: nowIso }] }
+        : url.includes('/alerts') ? [{ id: 'ta-1', code: 'tamper', device: 'WG-000777', openedAt: nowIso }, { id: 'ta-2', code: 'threshold', device: 'WG-000777' }]
+        : url.endsWith('/webhooks') ? { id: 'hook-1', secret: 'whsec_test' } : {};
+      return { status: 200, ok: true, json: async () => body, text: async () => JSON.stringify(body) };
+    });
+    eq(await TT.sync(), null, 'nothing happens without a key');
+    (CFG as any).titanKey = 'tk_test_key';
+    try {
+      const r = (await TT.sync())!;
+      eq(r.matched, 1); ok(r.unmatched[0].includes('Somewhere else')); eq(r.devices, 1); eq(r.stored, 1); eq(r.errors, []);
+      eq(await db.val(`SELECT code FROM warehouses WHERE titan_site_id='site-mna'`), 'WH-NI-MNA-02', 'matched by external reference');
+      const d = (await db.get<any>(`SELECT d.id, w.code FROM sensor_devices d JOIN warehouses w ON w.id=d.warehouse_id WHERE d.device_ref='WG-000777'`))!; eq(d.code, 'WH-NI-MNA-02');
+      ok(await db.val(`SELECT 1 FROM sensor_alerts WHERE device_id=$1 AND kind='tamper' AND ended_at IS NULL`, d.id), 'Titan’s tamper alert is passed on');
+      ok(!(await db.val(`SELECT 1 FROM sensor_alerts WHERE device_id=$1 AND kind NOT IN ('tamper') AND ended_at IS NULL`, d.id)), 'Titan thresholds are not duplicated; StorageX uses its own limits');
+      ok(calls.some((x) => x.startsWith('GET /readings?') && x.includes('metric=air.temperature%2Cair.humidity%2Csecurity.door%2Cpower.battery_soc')));
+      await rejects(TT.subscribe(), undefined);   // http base address: Titan needs https
+      const oldBase = CFG.baseUrl; (CFG as any).baseUrl = 'https://storagex.test';
+      try { eq((await TT.subscribe()).url, 'https://storagex.test/hooks/titan'); } finally { (CFG as any).baseUrl = oldBase; }
+      ok(!(await db.val<string>(`SELECT secret_enc FROM titan_link`))!.includes('whsec_test'), 'secret kept encrypted');
+      const hook = async (event: any, secret = 'whsec_test', t = Math.floor(Date.now() / 1000)) => {
+        const raw = JSON.stringify(event);
+        const sig = crypto.createHmac('sha256', secret).update(`${t}.${raw}`).digest('hex');
+        return (await fetch(base + '/hooks/titan', { method: 'POST', headers: { 'content-type': 'application/json', 'x-titan-signature': `t=${t},v1=${sig}`, 'x-titan-event': event.event }, body: raw })).status;
+      };
+      const later = Math.floor(Date.now() / 1000) - 30;
+      const reading = { event: 'reading.created', created_at: new Date().toISOString(), data: { dev: 'WG-000777', seq: 99, ts: later, r: [{ m: 'air.temperature', v: 33, ch: 'z1/dht22' }, { m: 'air.humidity', v: 64, ch: 'z1/dht22' }] } };
+      eq(await hook(reading, 'wrong'), 401);
+      eq(await hook(reading, 'whsec_test', Math.floor(Date.now() / 1000) - 900), 401, 'old signatures refused');
+      eq(await hook(reading), 200);
+      eq(await hook(reading), 200, 'a repeat is accepted and ignored');
+      eq(Number(await db.val(`SELECT temp_c FROM sensor_readings WHERE device_id=$1 AND at=to_timestamp($2)`, d.id, later)), 33);
+      ok(await db.val(`SELECT 1 FROM sensor_alerts WHERE device_id=$1 AND kind='high_temperature' AND ended_at IS NULL`, d.id), '33°C is over the 30°C limit');
+      eq(await hook({ event: 'alert.resolved', created_at: new Date().toISOString(), data: { id: 'ta-1', code: 'tamper', device: 'WG-000777' } }), 200);
+      ok(!(await db.val(`SELECT 1 FROM sensor_alerts WHERE device_id=$1 AND kind='tamper' AND ended_at IS NULL`, d.id)), 'closed when Titan resolves it');
+      await signInAs(admin);
+      const pg = await req('GET', '/warehouses/WH-NI-MNA-02'); ok(pg.text.includes('WareGuard on Titan') && pg.text.includes('site-mna'));
+      eq((await req('POST', '/warehouses/WH-OY-ISY-01/titan', { site_id: 'site-mna' })).status, 303);
+      eq(await db.val(`SELECT code FROM warehouses WHERE titan_site_id='site-mna'`), 'WH-NI-MNA-02', 'a site links to one warehouse only');
+      const st = await req('GET', '/admin/settings'); ok(st.text.includes('Live updates on'), 'connections panel shows it');
+      delete jar.sx_sid;
+    } finally { (CFG as any).titanKey = ''; }
   });
   server.close();
 

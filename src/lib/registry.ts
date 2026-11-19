@@ -292,11 +292,11 @@ export async function setFieldPartnerStatus(a: Actor, id: string, status: 'activ
 export interface Warehouse {
   id: string; code: string; name: string; operator_org_id: string; operator_name: string; tier: string; status: string; state_code: string; state_name: string;
   town: string | null; address_text: string | null; lat: string | null; lng: string | null; capacity_kg: string | null; can_back_loans: boolean; needs_review: boolean;
-  commodities: string[]; contact_name: string | null; contact_phone: string | null; updated_at: Date; lga_name: string | null;
+  commodities: string[]; contact_name: string | null; contact_phone: string | null; updated_at: Date; lga_name: string | null; titan_site_id: string | null;
 }
 const WH_COLS = `w.id, w.code, w.name, w.operator_org_id, o.name AS operator_name, w.tier, w.status, w.state_code, s.name AS state_name, w.town, w.address_text,
   w.lat::text, w.lng::text, w.capacity_kg::text, w.can_back_loans, w.needs_review, w.commodities, w.contact_name, w.contact_phone, w.updated_at,
-  (SELECT l.name FROM lgas l WHERE l.id=w.lga_id) AS lga_name`;
+  (SELECT l.name FROM lgas l WHERE l.id=w.lga_id) AS lga_name, w.titan_site_id`;
 
 /** Lenders, insurers and Kitovu see every warehouse profile (they assess sites); operators see their own. */
 function whScope(a: Actor) { const k = a.membership!.org_kind; return ['kitovu', 'lender', 'insurer'].includes(k) ? null : a.membership!.org_id; }   // issuers: their own or linked warehouses

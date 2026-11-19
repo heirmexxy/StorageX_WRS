@@ -3,6 +3,16 @@ import { HttpError } from '../lib/http';
 import * as PS from '../lib/paystack';
 import { bvnCheck } from '../lib/identity';
 import { act } from './admin';
+import * as TT from '../lib/titan';
+
+// Titan's webhook: made by `node dist/cli.mjs titan-connect`, which subscribes https://<site>/hooks/titan.
+post('/hooks/titan', 'webhook', async (c) => {
+  if (!(await TT.validSignature(c.raw, String(c.req.headers['x-titan-signature'] ?? '')))) throw new HttpError(401, 'Bad signature.');
+  try { await TT.handleEvent(c.body, c.raw); }
+  catch (e) { console.error('[titan]', e); throw new HttpError(500, 'Could not record the event; Titan will retry.'); }
+  c.text('OK');
+});
+post('/warehouses/:code/titan', 'perm:warehouses.edit', (c) => act(c, `/warehouses/${c.params.code}`, async () => { await TT.linkSite(c.actor, c.params.code, c.body.site_id); return c.body.site_id ? 'Linked to the Titan site. Readings arrive within 10 minutes.' : 'Unlinked from Titan.'; }));
 
 // Paystack's webhook: set it in the Paystack dashboard (Settings → API keys & webhooks) to
 // https://storagex.com.ng/hooks/paystack. Every event is checked against Paystack's signature.

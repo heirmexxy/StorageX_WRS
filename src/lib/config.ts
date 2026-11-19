@@ -32,6 +32,9 @@ export const config = {
   atSender: env('AT_SENDER_ID'),
   // Incoming texts (farmers texting BAL, KUDI, OWO or EGO) arrive at /sms/inbound?key=<this>.
   smsInboundKey: env('SMS_INBOUND_KEY'),
+  // Titan (WareGuard data). A key made in Titan's admin panel with read:readings, read:alerts and manage:webhooks.
+  titanKey: env('TITAN_API_KEY'),
+  titanBase: env('TITAN_BASE', 'https://titan.kitovu.com.ng/v1'),
   // Paystack: farmer payouts and buyer payment links. Its webhook is /hooks/paystack.
   paystackSecret: env('PAYSTACK_SECRET_KEY'),
   paystackBase: env('PAYSTACK_BASE', 'https://api.paystack.co'),

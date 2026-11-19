@@ -7,7 +7,7 @@ import { getSettings } from '../settings';
 import { config } from '../config';
 import { defaultModel, type ModelCall } from './model';
 
-export type SensorKind = 'high_temperature' | 'high_humidity' | 'door_open' | 'offline';
+export type SensorKind = 'high_temperature' | 'high_humidity' | 'door_open' | 'offline' | 'tamper' | 'intruder' | 'power_lost' | 'sensor_error';
 export interface Situation {
   kind: SensorKind; warehouse: string; device: string | null;
   value: number | null; limit: number; minutes: number;
@@ -83,6 +83,39 @@ export function playbook(s: Situation): Advice {
         ],
         urgency: s.minutes >= 24 * 60 ? 'urgent' : 'warn',
         for_lenders: `${lend}Your stock is still recorded and insured as before; only the live readings are missing.`,
+      };
+    // Raised by Titan itself (StorageX passes them on with the same playbook style).
+    case 'tamper':
+      return {
+        headline: `WareGuard at ${s.warehouse}${s.device ? ` (${s.device})` : ''} reports it was tampered with.`,
+        why: 'The device was opened, moved or its casing disturbed. Its readings cannot be trusted until it is checked, and someone may be trying to hide what happens in the store.',
+        actions: ['Call the warehouse manager and ask who was near the device.', 'Have Kitovu or the installer inspect the device and its seal today.', 'Kitovu orders a stock count at this warehouse.'],
+        urgency: 'urgent',
+        for_lenders: `${lend}Kitovu is inspecting the device and counting the stock. You will be told the result.`,
+      };
+    case 'intruder':
+      return {
+        headline: `Movement detected inside ${s.warehouse}${s.release_ordered ? '' : ' with no release on order'}.`,
+        why: s.release_ordered ? 'A release is ordered here, so this may be loading, but it must match the release order.' : 'Nothing should be moving in the store. This may be theft.',
+        actions: ['Call the warehouse manager and the site guard now.', 'If no one can explain it, call the police and Kitovu.', 'Kitovu orders a stock count at this warehouse today.'],
+        urgency: s.release_ordered ? 'warn' : 'urgent',
+        for_lenders: `${lend}Kitovu is checking with the site and will count the stock if the movement is not explained.`,
+      };
+    case 'power_lost':
+      return {
+        headline: `${s.warehouse} has lost mains power${s.device ? ` (${s.device})` : ''}.`,
+        why: 'Fans and lights are off, and WareGuard runs on its battery until power returns. Readings continue for now.',
+        actions: ['Ask the warehouse manager to check the supply and start the generator if there is one.', 'Keep doors shut and secured while the lights are off.'],
+        urgency: s.minutes >= 12 * 60 ? 'urgent' : 'warn',
+        for_lenders: `${lend}This is an operations matter; Kitovu will tell you if it affects the stock.`,
+      };
+    case 'sensor_error':
+      return {
+        headline: `A WareGuard sensor at ${s.warehouse}${s.device ? ` (${s.device})` : ''} is giving faulty readings.`,
+        why: 'Faulty readings are ignored, so conditions there are not being watched properly.',
+        actions: ['Ask the installer to check or replace the sensor.', 'Until it is fixed, take temperature and humidity readings by hand twice a day.'],
+        urgency: 'warn',
+        for_lenders: `${lend}Your stock is still recorded and insured as before.`,
       };
   }
 }

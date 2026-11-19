@@ -111,8 +111,25 @@ async function main() {
     }
     case 'wareguard-sweep': {
       const { sweepOffline } = await import('./lib/wareguard');
+      const { sync } = await import('./lib/titan');
+      const t = await sync();
+      if (t && (t.stored || t.errors.length)) console.log(`${t.at} Titan: ${t.matched}/${t.sites} sites, ${t.devices} devices, ${t.stored} new readings${t.errors.length ? `; problems: ${t.errors.join('; ')}` : ''}`);
       const n = await sweepOffline();
       if (n) console.log(`${new Date().toISOString()} WareGuard: ${n} device(s) quiet`);
+      break;
+    }
+    case 'titan-connect': {
+      // Once, after TITAN_API_KEY is set: check the key, match Titan sites to warehouses, fetch, and switch on live updates.
+      const T = await import('./lib/titan');
+      if (!T.connected()) { console.error('TITAN_API_KEY is not set in the server settings (.env). Add it, restart, and run this again.'); process.exitCode = 1; break; }
+      const all = await T.sites();
+      console.log(`Titan key works. Sites Titan shows this key: ${all.length}`);
+      const r = await T.sync();
+      console.log(`Matched to warehouses: ${r!.matched}. Devices: ${r!.devices}. Readings stored: ${r!.stored}.`);
+      for (const u of r!.unmatched) console.log(`  Not matched: ${u}. Set its external reference in Titan to the StorageX warehouse code (e.g. WH-OY-ISY-01), or link it on the warehouse page.`);
+      for (const e of r!.errors) console.log(`  Problem: ${e}`);
+      try { const w = await T.subscribe(); console.log(`Live updates switched on: Titan will send changes to ${w.url}.`); }
+      catch (e: any) { console.log(`Live updates not switched on: ${e.message} Readings are still fetched every 10 minutes.`); }
       break;
     }
     case 'purge-files': {

@@ -572,7 +572,7 @@ export function WarehousesPage({ c, rows, form, error, values }: { c: Ctx; rows:
   );
 }
 
-export function WarehousePage({ c, w, policies, issues }: { c: Ctx; w: Warehouse; policies: any[]; issues: Issue[] }) {
+export function WarehousePage({ c, w, policies, issues, titanSites }: { c: Ctx; w: Warehouse; policies: any[]; issues: Issue[]; titanSites?: { id: string; name: string; externalRef: string | null }[] | null }) {
   const edit = kitovu(c) && can(c.membership, 'warehouses.edit');
   return (
     <Page c={c} title={w.name}>
@@ -628,6 +628,23 @@ export function WarehousePage({ c, w, policies, issues }: { c: Ctx; w: Warehouse
         )}
         <p className="muted small">A second Kitovu person verifies each policy against the insurer’s schedule before it counts.</p>
       </section>
+      {edit && (
+        <section className="card">
+          <h2>WareGuard on Titan</h2>
+          <p className="muted">{w.titan_site_id ? `Linked to Titan site ${w.titan_site_id}. Readings and alerts from its devices show on Stock watch.` : `Not linked. In Titan, set the site’s external reference to ${w.code} and it links itself within 10 minutes, or choose the site here.`}</p>
+          {titanSites === null && <p className="flash error">Titan could not be reached just now. Try again in a few minutes.</p>}
+          {titanSites && (
+            <form method="post" action={`/warehouses/${w.code}/titan`} className="row">
+              <Csrf c={c} />
+              <select name="site_id" defaultValue={w.titan_site_id ?? ''} aria-label="Titan site">
+                <option value="">Not linked</option>
+                {titanSites.map((s) => <option key={s.id} value={s.id}>{`${s.name}${s.externalRef ? ` (${s.externalRef})` : ''}`}</option>)}
+              </select>
+              <button>Save link</button>
+            </form>
+          )}
+        </section>
+      )}
       {kitovu(c) && issues.length > 0 && <section className="card"><h2>Data issues</h2><IssueTable c={c} rows={issues} /></section>}
     </Page>
   );

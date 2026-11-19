@@ -1,68 +1,46 @@
-# Connecting Titan to StorageX (Build 13)
+# Connecting Titan to StorageX
 
-Titan manages WareGuard devices. StorageX needs two things from it: which device is in which warehouse, and the
-readings. Titan **pushes** both to StorageX's API; StorageX never calls Titan.
+Titan (https://titan.kitovu.com.ng) is where WareGuard devices report. StorageX **reads** from Titan's API with a key
+that **Titan issues**, and Titan **tells** StorageX of changes straight away by signed webhook. StorageX never sends
+anything to the devices.
 
-## 1. Get a key
+## What flows
 
-A Kitovu administrator signs in to StorageX, opens **Finance → API keys**, and creates a key named "Titan" with only
-the `wareguard:write` permission. Store it in Titan's secrets as `STORAGEX_API_KEY`. The key acts as the person who
-made it; if that person leaves Kitovu, make a new key from another administrator's account.
+| From Titan | Becomes in StorageX |
+|---|---|
+| Sites | Matched to warehouses: a site whose external reference is the warehouse code (e.g. `WH-OY-ISY-01`) links itself; otherwise by the same name, or chosen on the warehouse page |
+| Devices on a linked site | WareGuard devices of that warehouse (Titan's device id, e.g. `WG-000123`) |
+| Readings `air.temperature`, `air.humidity`, `security.door`, `power.battery_soc` | Readings on Stock watch, the dashboard and each warehouse; checked against **Settings → WareGuard limits** |
+| Alerts `tamper`, `intruder_detected`, `power_lost`, `sensor_error` | WareGuard alerts with advice, sent to Kitovu, the warehouse operator and lenders with stock there |
 
-## 2. Send devices when they are installed, moved or retired
+Heat, damp, doors left open and silent devices are judged by StorageX against its own limits, so Titan's
+`threshold`, `door_opened` and `device_offline` alerts are not duplicated. Produce moisture and other metrics stay in
+Titan for now.
 
-```http
-POST https://storagex.com.ng/api/v1/wareguard/devices
-Authorization: Bearer sxk_…
-Content-Type: application/json
+## Setting it up
 
-{ "device_ref": "WG-0042", "warehouse_code": "WH-OY-ISY-01", "label": "Bay 2, north wall", "active": true }
-```
+1. **Titan admin → API keys:** make a key named "StorageX" with the scopes `read:readings`, `read:alerts` and
+   `manage:webhooks`. It starts `tk_live_` and is shown once.
+2. **Server:** add it to `/srv/storagex/.env` as `TITAN_API_KEY=tk_live_…`, then run the update script (it restarts
+   the app).
+3. **In Titan, each WareGuard site:** set its external reference to the StorageX warehouse code.
+4. **Server, once:** `cd /srv/storagex && sudo -u storagex /opt/storagex-node/bin/node dist/cli.mjs titan-connect`.
+   It checks the key, lists which sites matched, fetches the last day of readings, and subscribes StorageX's
+   webhook (`https://storagex.com.ng/hooks/titan`) for `reading.created`, `alert.opened`, `alert.resolved`,
+   `device.online` and `device.offline`. The webhook's signing secret is kept encrypted in the database.
 
-`warehouse_code` is the StorageX warehouse code (shown on every warehouse page). Send `"active": false` to retire a
-device. Sending the same device again updates it.
+After that the every-10-minutes job (`wareguard-sweep`) also fetches anything a webhook missed. Status shows in
+**Settings → Connections**.
 
-## 3. Send readings every 5–15 minutes
+## Security
 
-```http
-POST https://storagex.com.ng/api/v1/wareguard/readings
-Authorization: Bearer sxk_…
-Content-Type: application/json
+- Webhooks are checked against `X-Titan-Signature` (`t=<unix>,v1=<HMAC-SHA256 of "<t>.<body>">`) and refused if
+  more than 5 minutes old. Each event is handled once.
+- The Titan key is read-only apart from managing StorageX's own webhook. If it leaks, revoke it in Titan, make a
+  new one and run step 2 and step 4 again.
 
-{ "devices": [
-  { "device_ref": "WG-0042", "readings": [
-    { "at": "2026-11-19T10:00:00Z", "temp_c": 27.4, "rh_pct": 63.1, "door_open": false, "battery_pct": 88 }
-  ] }
-] }
-```
+## The older push route
 
-- `at` is when the reading was taken (ISO 8601, UTC). Readings from the future are ignored.
-- Any field may be left out if the device does not measure it. `door_open` is `true` while a door is open.
-- Resending the same reading is harmless (one per device per `at`), so after an outage Titan can resend its backlog:
-  up to 500 devices and 2,000 readings per device per request.
-- The answer is `{ "stored": n, "unknown_devices": [...] }`. An unknown device means it was never sent to step 2.
-
-## What StorageX does with them
-
-- Each batch is checked straight away against the limits in **Settings → WareGuard limits** (temperature, humidity,
-  door open too long). Outside a limit, StorageX opens one alert per condition, writes advice for the warehouse team
-  (the WareGuard explainer), and alerts Kitovu, the warehouse operator and every lender with stock pledged there. The
-  alert closes itself when conditions are back inside the limits.
-- Every 10 minutes StorageX marks devices that have sent nothing for longer than the offline limit.
-- Receipt issuers may issue only where WareGuard is reporting (unless Kitovu has waived it for a pilot).
-- Readings show on **Stock watch**, the **business dashboard** and the connections panel in **Settings**.
-
-## Sample sender (Node 18+)
-
-```js
-const KEY = process.env.STORAGEX_API_KEY;
-export async function pushReadings(devices) {   // [{ device_ref, readings: [...] }]
-  const r = await fetch('https://storagex.com.ng/api/v1/wareguard/readings', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${KEY}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ devices }),
-  });
-  if (!r.ok) throw new Error(`StorageX ${r.status}: ${await r.text()}`);
-  return r.json();
-}
-```
+StorageX still accepts `POST /api/v1/wareguard/devices` and `/readings` with a StorageX key holding
+`wareguard:write` (see the API documentation), for devices or partners that cannot go through Titan. Titan itself
+does not need it.
