@@ -17,23 +17,23 @@ ON CONFLICT (code) DO NOTHING;
 
 -- Commodity codes keep the legacy three-letter codes so old receipts still read correctly.
 -- max_moisture_pct 13.0 for grains and legumes follows Kitovu's StorageX process flow; others are set later.
-INSERT INTO commodities (code, name, category, unit, storable, max_moisture_pct) VALUES
-('MAZ','Maize','grain','kg',true,13.0),
-('RCE','Paddy rice','grain','kg',true,13.0),
-('SGM','Sorghum (guinea corn)','grain','kg',true,13.0),
-('MLT','Millet','grain','kg',true,13.0),
-('WHT','Wheat','grain','kg',true,13.0),
-('SBN','Soybean','legume','kg',true,13.0),
-('BNS','Beans (cowpea)','legume','kg',true,13.0),
-('BBN','Bambara nut','legume','kg',true,13.0),
-('SES','Sesame (beniseed)','oilseed','kg',true,NULL),
-('CCA','Cocoa','tree_crop','kg',true,NULL),
-('PML','Palm oil','oil','l',true,NULL),
-('YAM','Yam','tuber','kg',false,NULL),
-('IPS','Irish potato','tuber','kg',false,NULL),
-('SPS','Sweet potato','tuber','kg',false,NULL),
-('TMS','Tomato','vegetable','kg',false,NULL),
-('PPR','Pepper','vegetable','kg',false,NULL),
-('ONS','Onion','vegetable','kg',false,NULL)
+INSERT INTO commodities (code, name, category, unit, storable, max_moisture_pct, max_storage_months) VALUES
+('MAZ','Maize','grain','kg',true,13.0,6),
+('RCE','Paddy rice','grain','kg',true,13.0,6),
+('SGM','Sorghum (guinea corn)','grain','kg',true,13.0,6),
+('MLT','Millet','grain','kg',true,13.0,6),
+('WHT','Wheat','grain','kg',true,13.0,6),
+('SBN','Soybean','legume','kg',true,13.0,6),
+('BNS','Beans (cowpea)','legume','kg',true,13.0,6),
+('BBN','Bambara nut','legume','kg',true,13.0,6),
+('SES','Sesame (beniseed)','oilseed','kg',true,NULL,6),
+('CCA','Cocoa','tree_crop','kg',true,NULL,6),
+('PML','Palm oil','oil','l',true,NULL,6),
+('YAM','Yam','tuber','kg',false,NULL,3),
+('IPS','Irish potato','tuber','kg',false,NULL,3),
+('SPS','Sweet potato','tuber','kg',false,NULL,3),
+('TMS','Tomato','vegetable','kg',false,NULL,1),
+('PPR','Pepper','vegetable','kg',false,NULL,1),
+('ONS','Onion','vegetable','kg',false,NULL,1)
 ON CONFLICT (code) DO NOTHING;
 

@@ -46,6 +46,7 @@ async function receiptOut(x: A.ApiCtx, no: string) {
     receipt_no: r.receipt_no, status: r.status, commodity: { code: r.commodity_code, name: r.commodity }, grade: r.grade, moisture_pct: Number(r.moisture_pct),
     net_weight_kg: Number(r.net_weight_kg), bags: r.bags, warehouse: { code: r.wh_code, name: r.wh_name }, issued_at: iso(r.issued_at),
     issuer: r.issuer_name ?? 'Kitovu',
+    storage: (() => { const t = Rc.termOf(r); return { months: t.months, until: t.until, days_left: t.days, state: t.state }; })(),
     value_at_storage: r.issue_value_kobo != null ? { kobo: kobo(r.issue_value_kobo), kobo_per_kg: kobo(r.issue_kobo_per_kg) } : null,
     value_today: today ? { kobo: kobo(today.market_value_kobo), kobo_per_kg: kobo(today.kobo_per_kg), on: ymd(today.valued_on) } : null,
     insurance: r.insurer_name ? { insurer: r.insurer_name, policy_no: r.policy_number, cover_to: ymd(r.cover_to) } : null,

@@ -46,7 +46,7 @@ export function IntakesPage({ c, rows, q }: { c: Ctx; rows: any[]; q: Record<str
   );
 }
 
-export function IntakePage({ c, i, issue }: { c: Ctx; i: any; issue?: { blockers: string[]; receipts: any[] } }) {
+export function IntakePage({ c, i, issue }: { c: Ctx; i: any; issue?: { blockers: string[]; receipts: any[]; term?: { max: number; def: number } } }) {
   const kitovu = c.membership?.org_kind === 'kitovu';
   const photo = (sha: string) => i.photos.find((p: any) => p.sha256 === sha);
   const ai = i.ai_check;
@@ -144,10 +144,13 @@ export function IntakePage({ c, i, issue }: { c: Ctx; i: any; issue?: { blockers
               <form method="post" action={`/intakes/${i.ref}/issue`} className="row">
                 <Csrf c={c} />
                 <input name="split" placeholder="One receipt, or split: a number (e.g. 2) or weights (e.g. 500, 500.5)" aria-label="Split" />
+                <select name="storage_months" defaultValue={String(issue.term?.def ?? 6)} aria-label="Storage term">
+                  {Array.from({ length: issue.term?.max ?? 6 }, (_, k) => k + 1).map((m) => <option key={m} value={m}>{`Store for ${m} month${m === 1 ? '' : 's'}`}</option>)}
+                </select>
                 <button className="primary">Issue receipt</button>
               </form>
             )}
-          <p className="muted small">Splitting lets the farmer pledge or sell part of the stock. The farmer gets a text with the receipt number and a link to check it.</p>
+          <p className="muted small">{`The storage term (up to ${issue.term?.max ?? 6} month${issue.term?.max === 1 ? '' : 's'} for this crop) is printed on the receipt. Loans must fall due within it, and it can be extended. Splitting lets the farmer pledge or sell part of the stock. The farmer gets a text with the receipt number and a link to check it.`}</p>
         </section>
       )}
     </Page>

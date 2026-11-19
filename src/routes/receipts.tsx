@@ -24,12 +24,13 @@ get('/receipts/:no/pdf', 'perm:receipts.view', async (c) => {
   try { const { pdf, name } = await Rc.receiptPdf(c.actor, c.params.no); c.bytes(pdf, 'application/pdf', name); }
   catch (e) { if (e instanceof UserError) throw new HttpError(404, e.message); throw e; }
 });
+post('/receipts/:no/extend', 'perm:receipts.issue', (c) => act(c, `/receipts/${c.params.no}`, async () => `Storage term extended to ${Rc.ymdText(await Rc.extendTerm(c.actor, c.params.no, c.body))}.`));
 post('/receipts/:no/cancel', 'perm:receipts.issue', (c) => act(c, `/receipts/${c.params.no}`, async () => { await Rc.cancelReceipt(c.actor, c.params.no, c.body.reason); return 'Receipt cancelled.'; }));
 
 post('/intakes/:ref/issue', 'perm:receipts.issue', (c) => act(c, `/intakes/${c.params.ref}`, async () => {
   const i = await intakeByRef(c.actor, c.params.ref);
   if (!i) throw new UserError('Delivery not found.');
-  const r = await Rc.issueFromIntake(c.actor, i.id, c.body.split);
+  const r = await Rc.issueFromIntake(c.actor, i.id, c.body.split, c.body.storage_months);
   setImmediate(() => void Rc.notifyIssued(r));
   return `Issued ${r.receipts.map((x) => x.no).join(', ')}.`;
 }));

@@ -38,6 +38,10 @@ export const EVENTS: Record<string, { label: string; vars: string[]; en: string;
     en: 'StorageX: {buyer} offers {price} for your {crop} on receipt {receipt}, about {amount} before fees and any loan. Kitovu will ask if you agree. Do not share any code unless you agree.' },
   balance_reply: { label: 'Farmer helper: what my produce is worth and what I owe', vars: ['held', 'worth', 'owed', 'due'],
     en: 'StorageX: in store {held}, worth about {worth} at today’s prices. You owe {owed}. Next due date: {due}. Prices change; this is a guide, not an offer.' },
+  storage_term_ending: { label: 'Reminder: receipt storage term ending', vars: ['receipt', 'crop', 'warehouse', 'until', 'days'], reminder: true,
+    en: 'StorageX: the storage term on receipt {receipt} ({crop} at {warehouse}) ends on {until}, in {days} days. Sell, collect or ask Kitovu to extend it.' },
+  storage_extended: { label: 'Receipt storage term extended', vars: ['receipt', 'until'],
+    en: 'StorageX: the storage term on receipt {receipt} now runs to {until}. Storage fees continue at the published rate.' },
   ussd_pin_reset: { label: 'USSD PIN reset by Kitovu', vars: ['ussd'],
     en: 'StorageX: your PIN was reset by Kitovu. Dial {ussd} to choose a new one. If you did not ask for this, call Kitovu.' },
 };

@@ -64,6 +64,11 @@ td.actions form + form { margin-left: 10px; }
 .badge.ok, .badge.l1 { background: #e3f1e8; color: var(--ok); }
 .badge.l2 { background: var(--brand); color: #fff; }
 .badge.warn { background: #fbf1d9; color: var(--warn); }
+.badge.bad { background: #fdf0ef; color: var(--bad); }
+.avatar { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; background: #eef1ee; display: block; }
+.avatar.sm { width: 40px; height: 40px; }
+.profile-head { display: flex; gap: 16px; align-items: center; }
+.avatar-empty { display: grid; place-items: center; color: var(--muted); font-size: 32px; font-weight: 600; }
 .filters { flex-wrap: wrap; align-items: center; }
 .filters input[name=q] { flex: 1; min-width: 220px; }
 .check { display: flex; gap: 8px; align-items: center; margin: 6px 0; font-weight: 400; }

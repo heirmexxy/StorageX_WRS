@@ -9,6 +9,8 @@ import { actorOf, type Actor } from './auth';
 import { can, type Permission } from './rbac';
 import { UserError } from './errors';
 import { normPhone, clean } from './util';
+import { saveFile } from './files';
+import type { Upload } from './http';
 
 export class NotAllowed extends UserError {}
 function need(a: Actor, perm: Permission, msg = 'Your role does not allow this.') { if (!can(a.membership, perm)) throw new NotAllowed(msg); }
@@ -20,6 +22,7 @@ export interface Farmer {
   community: string | null; commodities: string[]; kyc_level: number; status: string; needs_review: boolean; source: string;
   year_of_birth: number | null; phone_verified_at: Date | null; phone_check_method: 'sms' | 'voice' | 'attested' | null; phone_attestation: any; id_type: string | null; id_last4: string | null; created_at: Date; updated_at: Date;
   registered_by_name?: string | null; open_issues?: number;
+  kind: 'individual' | 'agribusiness'; business_reg_no: string | null; contact_person: string | null; contact_role: string | null; profile_photo_id: string | null;
 }
 
 /** SQL condition (on alias f) limiting farmers to what the actor may see; $1 is the actor's org id. */
@@ -36,7 +39,8 @@ function farmerScope(a: Actor): { where: string; arg: string | null } {
 }
 
 const FARMER_COLS = `f.id, f.code, f.full_name, f.phone_e164, f.sex, f.state_code, s.name AS state_name, f.community, f.commodities, f.kyc_level, f.status,
-  f.needs_review, f.source, f.year_of_birth, f.phone_verified_at, f.phone_check_method, f.phone_attestation, f.id_type, f.id_last4, f.created_at, f.updated_at`;
+  f.needs_review, f.source, f.year_of_birth, f.phone_verified_at, f.phone_check_method, f.phone_attestation, f.id_type, f.id_last4, f.created_at, f.updated_at,
+  f.kind, f.business_reg_no, f.contact_person, f.contact_role, f.profile_photo_id`;
 
 /** Lists show 100 rows a page; the page number comes from the address. */
 export const PAGE_SIZE = 100;
@@ -71,11 +75,18 @@ export async function farmerByCode(a: Actor, code: string) {
      WHERE f.code=upper($2) AND ${sc.where}`, sc.arg, code);
 }
 
-export interface FarmerInput { full_name?: string; phone?: string; sex?: string; state_code?: string; community?: string; commodities?: string | string[]; year_of_birth?: string; field_partner_code?: string; confirm_duplicate?: string }
+export interface FarmerInput { kind?: string; business_reg_no?: string; contact_person?: string; contact_role?: string; full_name?: string; phone?: string; sex?: string; state_code?: string; community?: string; commodities?: string | string[]; year_of_birth?: string; field_partner_code?: string; confirm_duplicate?: string }
 
 async function farmerFields(i: FarmerInput) {
+  const kind = i.kind === 'agribusiness' ? 'agribusiness' : 'individual';
   const full_name = clean(i.full_name, 120);
-  if (full_name.length < 3 || !/\s/.test(full_name)) throw new UserError('Enter the farmer’s first name and surname.');
+  const biz = kind === 'agribusiness';
+  if (biz && full_name.length < 3) throw new UserError('Enter the agribusiness’s registered name.');
+  if (!biz && (full_name.length < 3 || !/\s/.test(full_name))) throw new UserError('Enter the farmer’s first name and surname.');
+  const contact_person = biz ? clean(i.contact_person, 120) : '';
+  if (biz && (contact_person.length < 3 || !/\s/.test(contact_person))) throw new UserError('Enter the full name of the person who speaks for the agribusiness.');
+  const business_reg_no = biz ? clean(i.business_reg_no, 20).toUpperCase().replace(/\s+/g, ' ') : '';
+  if (business_reg_no && !/^[A-Z]{0,4}[ -]?[0-9]{3,10}$/.test(business_reg_no)) throw new UserError('Registration number: as on the certificate, e.g. RC 1348965 or BN 3456789.');
   const phone = i.phone ? normPhone(i.phone) : null;
   if (i.phone && !phone) throw new UserError('That phone number does not look right. Use the 11-digit form, e.g. 08031234567.');
   const sex = ['female', 'male'].includes(String(i.sex)) ? String(i.sex) : null;
@@ -91,14 +102,15 @@ async function farmerFields(i: FarmerInput) {
   const yob = i.year_of_birth ? Number(i.year_of_birth) : null;
   const thisYear = new Date().getFullYear();
   if (yob !== null && !(Number.isInteger(yob) && yob >= thisYear - 100 && yob <= thisYear - 16)) throw new UserError('Year of birth must be a real year, and the farmer at least 16.');
-  return { full_name, phone_e164: phone, sex, state_code, community: clean(i.community, 120) || null, commodities, year_of_birth: yob };
+  return { kind, full_name, phone_e164: phone, sex: biz ? null : sex, state_code, community: clean(i.community, 120) || null, commodities, year_of_birth: biz ? null : yob,
+    business_reg_no: business_reg_no || null, contact_person: contact_person || null, contact_role: biz ? clean(i.contact_role, 60) || null : null };
 }
 
 /** Farmers sharing this phone (phones are shared in families, so this warns rather than blocks). */
 export const farmersWithPhone = (phone: string, exceptId?: string) =>
   db.all<{ code: string; full_name: string }>(`SELECT code, full_name FROM farmers WHERE phone_e164=$1 AND status='active' AND ($2::uuid IS NULL OR id<>$2)`, phone, exceptId ?? null);
 
-export async function createFarmer(a: Actor, i: FarmerInput) {
+export async function createFarmer(a: Actor, i: FarmerInput, photo?: Upload) {
   need(a, 'farmers.edit', 'Your role cannot register farmers.');
   const v = await farmerFields(i);
   let partnerId: string | null = null;
@@ -115,10 +127,11 @@ export async function createFarmer(a: Actor, i: FarmerInput) {
   return tx(async () => {
     const code = 'SXF-' + String(await db.val<string>(`SELECT nextval('farmer_code_seq')`)).padStart(6, '0');
     const id = await db.val<string>(
-      `INSERT INTO farmers (code, full_name, phone_e164, sex, state_code, community, commodities, year_of_birth, registered_by_user, registered_by_partner, source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'app') RETURNING id`,
-      code, v.full_name, v.phone_e164, v.sex, v.state_code, v.community, v.commodities, v.year_of_birth, a.user.id, partnerId);
-    await audit(actorOf(a), 'farmer.registered', { orgId: a.membership!.org_id, entity: 'farmer', entityId: id!, data: { code, state: v.state_code, by_partner: !!partnerId } });
+      `INSERT INTO farmers (code, full_name, phone_e164, sex, state_code, community, commodities, year_of_birth, registered_by_user, registered_by_partner, source, kind, business_reg_no, contact_person, contact_role)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'app',$11,$12,$13,$14) RETURNING id`,
+      code, v.full_name, v.phone_e164, v.sex, v.state_code, v.community, v.commodities, v.year_of_birth, a.user.id, partnerId, v.kind, v.business_reg_no, v.contact_person, v.contact_role);
+    if (photo && photo.data.length) await attachPhoto(a, id!, photo);
+    await audit(actorOf(a), 'farmer.registered', { orgId: a.membership!.org_id, entity: 'farmer', entityId: id!, data: { code, kind: v.kind, state: v.state_code, by_partner: !!partnerId, photo: !!photo?.data.length } });
     return code;
   });
 }
@@ -145,13 +158,41 @@ export async function updateFarmer(a: Actor, code: string, i: FarmerInput) {
   await tx(async () => {
     // A new phone number must be confirmed again; an identity check already approved stays valid.
     await db.run(`UPDATE farmers SET full_name=$2, phone_e164=$3, sex=$4, state_code=$5, community=$6, commodities=$7, year_of_birth=$8, updated_at=now(),
+                  kind=$9, business_reg_no=$10, contact_person=$11, contact_role=$12,
                   phone_verified_at = CASE WHEN phone_e164 IS DISTINCT FROM $3 THEN NULL ELSE phone_verified_at END,
                   phone_check_method = CASE WHEN phone_e164 IS DISTINCT FROM $3 AND phone_check_method <> 'attested' THEN NULL ELSE phone_check_method END WHERE id=$1`,
-      f.id, v.full_name, v.phone_e164, v.sex, v.state_code, v.community, v.commodities, v.year_of_birth);
+      f.id, v.full_name, v.phone_e164, v.sex, v.state_code, v.community, v.commodities, v.year_of_birth, v.kind, v.business_reg_no, v.contact_person, v.contact_role);
     await audit(actorOf(a), 'farmer.updated', { orgId: a.membership!.org_id, entity: 'farmer', entityId: f.id, data: { code: f.code, changed } });
   });
   return 'Saved.';
 }
+// ---------- profile photo ----------
+// A face photo (or, for an agribusiness, the contact person's photo) so field teams, warehouse staff and lenders
+// recognise the person who stores. It is encrypted like every upload and never shown on the public check page.
+async function attachPhoto(a: Actor, farmerId: string, photo: Upload) {
+  const fileId = await saveFile(photo, { kind: 'profile_photo', entity: 'farmer', entityId: farmerId, userId: a.user.id, label: 'Profile photo' });
+  const old = await db.val<string>('SELECT profile_photo_id FROM farmers WHERE id=$1', farmerId);
+  await db.run('UPDATE farmers SET profile_photo_id=$2, updated_at=now() WHERE id=$1', farmerId, fileId);
+  if (old) await db.run('UPDATE files SET delete_after=current_date WHERE id=$1', old);   // the replaced photo is removed by the retention job
+  return fileId;
+}
+export async function setFarmerPhoto(a: Actor, code: string, photo: Upload | undefined) {
+  need(a, 'farmers.edit', 'Your role cannot change farmer records.');
+  const f = await farmerByCode(a, code);
+  if (!f) throw new UserError('Farmer not found.');
+  if (!photo || !photo.data.length) throw new UserError('Profile photo: take or choose a photo.');
+  await tx(async () => {
+    await attachPhoto(a, f.id, photo);
+    await audit(actorOf(a), 'farmer.photo_set', { orgId: a.membership!.org_id, entity: 'farmer', entityId: f.id, data: { code: f.code, replaced: !!f.profile_photo_id } });
+  });
+}
+/** Whether this person may see this farmer at all (the same rule as the farmer list). */
+export async function canSeeFarmer(a: Actor, farmerId: string) {
+  if (!a.membership || !can(a.membership, 'farmers.view')) return false;
+  const sc = farmerScope(a);
+  return !!(await db.val(`SELECT 1 FROM farmers f WHERE f.id=$2 AND ${sc.where}`, sc.arg, farmerId));
+}
+
 export const mask = (p: string) => p.slice(0, 7) + '•••' + p.slice(-2);
 
 export async function setFarmerStatus(a: Actor, code: string, status: 'active' | 'inactive', reason: string) {
@@ -251,10 +292,11 @@ export async function setFieldPartnerStatus(a: Actor, id: string, status: 'activ
 export interface Warehouse {
   id: string; code: string; name: string; operator_org_id: string; operator_name: string; tier: string; status: string; state_code: string; state_name: string;
   town: string | null; address_text: string | null; lat: string | null; lng: string | null; capacity_kg: string | null; can_back_loans: boolean; needs_review: boolean;
-  commodities: string[]; contact_name: string | null; contact_phone: string | null; updated_at: Date;
+  commodities: string[]; contact_name: string | null; contact_phone: string | null; updated_at: Date; lga_name: string | null;
 }
 const WH_COLS = `w.id, w.code, w.name, w.operator_org_id, o.name AS operator_name, w.tier, w.status, w.state_code, s.name AS state_name, w.town, w.address_text,
-  w.lat::text, w.lng::text, w.capacity_kg::text, w.can_back_loans, w.needs_review, w.commodities, w.contact_name, w.contact_phone, w.updated_at`;
+  w.lat::text, w.lng::text, w.capacity_kg::text, w.can_back_loans, w.needs_review, w.commodities, w.contact_name, w.contact_phone, w.updated_at,
+  (SELECT l.name FROM lgas l WHERE l.id=w.lga_id) AS lga_name`;
 
 /** Lenders, insurers and Kitovu see every warehouse profile (they assess sites); operators see their own. */
 function whScope(a: Actor) { const k = a.membership!.org_kind; return ['kitovu', 'lender', 'insurer'].includes(k) ? null : a.membership!.org_id; }   // issuers: their own or linked warehouses
@@ -271,31 +313,135 @@ export async function warehouseByCode(a: Actor, code: string) {
 }
 export const policiesFor = (warehouseId: string) => db.all(`SELECT * FROM insurance_policies WHERE warehouse_id=$1 ORDER BY cover_to DESC NULLS LAST`, warehouseId);
 
+/** The checked profile fields shared by adding and editing a warehouse. */
+async function warehouseFields(i: Record<string, string | string[] | undefined>, cur?: { status: string; tier: string }) {
+  const str = (k: string) => (Array.isArray(i[k]) ? (i[k] as string[]).join(',') : String(i[k] ?? ''));
+  const num = (v: string, lo: number, hi: number, label: string) => {
+    if (!v.trim()) return null; const n = Number(v); if (!Number.isFinite(n) || n < lo || n > hi) throw new UserError(`${label} is out of range.`); return n;
+  };
+  const lat = num(str('lat'), 4, 14, 'Latitude (Nigeria is 4–14° N)'), lng = num(str('lng'), 2, 15, 'Longitude (Nigeria is 2–15° E)');
+  const cap = num(str('capacity_tonnes'), 1, 1_000_000, 'Capacity');
+  const phone = str('contact_phone') ? normPhone(str('contact_phone')) : null;
+  if (str('contact_phone') && !phone) throw new UserError('Contact phone does not look right.');
+  const status = ['onboarding', 'certified', 'active', 'dormant', 'closed'].includes(str('status')) ? str('status') : cur?.status ?? 'onboarding';
+  const tier = ['A', 'B', 'C', 'D'].includes(str('tier')) ? str('tier') : cur?.tier;
+  if (!tier) throw new UserError('Choose the warehouse tier.');
+  if ((status === 'certified' || status === 'active') && (lat === null || lng === null || cap === null)) throw new UserError('A certified or active warehouse needs GPS coordinates and capacity first.');
+  const commodities = [...new Set(str('commodities').split(/[,\s]+/).map((c) => c.trim().toUpperCase()).filter(Boolean))];
+  if (commodities.length) {
+    const known = await db.all<{ code: string }>('SELECT code FROM commodities WHERE code = ANY($1)', commodities);
+    const bad = commodities.filter((c) => !known.some((k) => k.code === c)); if (bad.length) throw new UserError(`Unknown commodity: ${bad.join(', ')}.`);
+  }
+  return { lat, lng, capacity_kg: cap === null ? null : cap * 1000, contact_name: clean(str('contact_name'), 120) || null, contact_phone: phone, commodities, status, tier,
+    town: clean(str('town'), 80) || null, address_text: clean(str('address_text'), 300) || null, lga: clean(str('lga'), 80) || null };
+}
+/** LGAs are kept as they are first entered for a state, so the same name is one row. */
+async function lgaId(state: string, name: string | null) {
+  if (!name) return null;
+  return db.val<string>(`INSERT INTO lgas (state_code, name) VALUES ($1, $2) ON CONFLICT (state_code, name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, state, name.replace(/\b\w/g, (x) => x.toUpperCase()));
+}
+
+/** Operators a warehouse can be run by. */
+export const warehouseOperators = () => db.all<{ id: string; name: string; kind: string }>(
+  `SELECT id, name, kind::text FROM organisations WHERE kind::text IN ('kitovu','warehouse_operator','cooperative','issuer','other') AND status <> 'closed' ORDER BY kind='kitovu' DESC, name`);
+
+/** The short site part of a warehouse code: from what is typed, else the town's first letters (e.g. Iseyin → ISY). */
+export function siteCode(typed: string | undefined, town: string | null) {
+  const t = String(typed ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (t) { if (t.length < 3 || t.length > 6) throw new UserError('Site code: 3 to 6 letters or digits, e.g. ISY.'); return t; }
+  const w = String(town ?? '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (w.length < 3) throw new UserError('Enter the town, or a 3-letter site code.');
+  const consonants = w[0] + w.slice(1).replace(/[AEIOU]/g, '');
+  return (consonants.length >= 3 ? consonants : w).slice(0, 3);
+}
+
+/** Kitovu adds a warehouse. It starts as onboarding unless the GPS and capacity are there to certify it. */
+export async function createWarehouse(a: Actor, i: Record<string, string | string[] | undefined>) {
+  need(a, 'warehouses.edit', 'Your role cannot add warehouses.');
+  if (!isKitovu(a)) throw new NotAllowed('Warehouses are added by Kitovu.');
+  const name = clean(String(i.name ?? ''), 120);
+  if (name.length < 3) throw new UserError('Enter the warehouse name.');
+  const state = clean(String(i.state_code ?? ''), 2).toUpperCase();
+  if (!(await db.val('SELECT 1 FROM states WHERE code=$1', state))) throw new UserError('Choose the state the warehouse is in.');
+  const op = await db.get<{ id: string; name: string }>(`SELECT id, name FROM organisations WHERE id::text=$1`, String(i.operator_org_id ?? ''));
+  if (!op) throw new UserError('Choose the company that runs the warehouse (add it under Organisations first if it is new).');
+  const v = await warehouseFields(i);
+  if (!v.town) throw new UserError('Enter the town the warehouse is in.');
+  const site = siteCode(i.site_code as string | undefined, v.town);
+  return tx(async () => {
+    const prefix = `WH-${state}-${site}-`;
+    await db.run('SELECT pg_advisory_xact_lock(hashtext($1))', prefix);
+    if (await db.val(`SELECT 1 FROM warehouses WHERE lower(name)=lower($1) AND state_code=$2`, name, state)) throw new UserError(`There is already a warehouse called ${name} in this state.`);
+    const n = Number(await db.val(`SELECT count(*) FROM warehouses WHERE code LIKE $1 || '%'`, prefix)) + 1;
+    if (n > 99) throw new UserError('That site code is full. Choose another site code.');
+    const code = prefix + String(n).padStart(2, '0');
+    const id = await db.val<string>(
+      `INSERT INTO warehouses (code, name, operator_org_id, tier, status, state_code, lga_id, town, address_text, lat, lng, capacity_kg, contact_name, contact_phone, commodities, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+      code, name, op.id, v.tier, v.status, state, await lgaId(state, v.lga), v.town, v.address_text, v.lat, v.lng, v.capacity_kg, v.contact_name, v.contact_phone, v.commodities, a.user.id);
+    await audit(actorOf(a), 'warehouse.created', { orgId: op.id, entity: 'warehouse', entityId: id!, data: { code, name, operator: op.name, tier: v.tier, status: v.status } });
+    return code;
+  });
+}
+
 export async function updateWarehouse(a: Actor, code: string, i: Record<string, string>) {
   need(a, 'warehouses.edit', 'Your role cannot edit warehouse profiles.');
   if (!isKitovu(a)) throw new NotAllowed('Warehouse profiles are maintained by Kitovu.');
   const w = await warehouseByCode(a, code);
   if (!w) throw new UserError('Warehouse not found.');
-  const num = (v: string | undefined, lo: number, hi: number, label: string) => {
-    if (!v?.trim()) return null; const n = Number(v); if (!Number.isFinite(n) || n < lo || n > hi) throw new UserError(`${label} is out of range.`); return n;
-  };
-  const lat = num(i.lat, 4, 14, 'Latitude (Nigeria is 4–14° N)'), lng = num(i.lng, 2, 15, 'Longitude (Nigeria is 2–15° E)');
-  const cap = num(i.capacity_tonnes, 1, 1_000_000, 'Capacity');
-  const phone = i.contact_phone ? normPhone(i.contact_phone) : null;
-  if (i.contact_phone && !phone) throw new UserError('Contact phone does not look right.');
-  const status = ['onboarding', 'certified', 'active', 'dormant', 'closed'].includes(i.status) ? i.status : w.status;
-  const tier = ['A', 'B', 'C', 'D'].includes(i.tier) ? i.tier : w.tier;
-  if ((status === 'certified' || status === 'active') && (lat === null || lng === null || cap === null)) throw new UserError('A certified or active warehouse needs GPS coordinates and capacity first.');
-  const commodities = [...new Set(String(i.commodities ?? '').split(/[,\s]+/).map((c) => c.trim().toUpperCase()).filter(Boolean))];
-  if (commodities.length) {
-    const known = await db.all<{ code: string }>('SELECT code FROM commodities WHERE code = ANY($1)', commodities);
-    const bad = commodities.filter((c) => !known.some((k) => k.code === c)); if (bad.length) throw new UserError(`Unknown commodity: ${bad.join(', ')}.`);
-  }
+  const v = await warehouseFields(i, w);
   await tx(async () => {
-    await db.run(`UPDATE warehouses SET name=$2, town=$3, address_text=$4, lat=$5, lng=$6, capacity_kg=$7, contact_name=$8, contact_phone=$9, commodities=$10, status=$11, tier=$12, updated_at=now() WHERE id=$1`,
-      w.id, clean(i.name, 120) || w.name, clean(i.town, 80) || null, clean(i.address_text, 300) || null, lat, lng, cap === null ? null : cap * 1000, clean(i.contact_name, 120) || null, phone, commodities, status, tier);
-    await audit(actorOf(a), 'warehouse.updated', { orgId: w.operator_org_id, entity: 'warehouse', entityId: w.id, data: { code: w.code, status: [w.status, status], tier: [w.tier, tier] } });
+    await db.run(`UPDATE warehouses SET name=$2, town=$3, address_text=$4, lat=$5, lng=$6, capacity_kg=$7, contact_name=$8, contact_phone=$9, commodities=$10, status=$11, tier=$12, lga_id=COALESCE($13, lga_id), updated_at=now() WHERE id=$1`,
+      w.id, clean(i.name, 120) || w.name, v.town, v.address_text, v.lat, v.lng, v.capacity_kg, v.contact_name, v.contact_phone, v.commodities, v.status, v.tier, await lgaId(w.state_code, v.lga));
+    await audit(actorOf(a), 'warehouse.updated', { orgId: w.operator_org_id, entity: 'warehouse', entityId: w.id, data: { code: w.code, status: [w.status, v.status], tier: [w.tier, v.tier] } });
   });
+}
+
+// ---------- commodities (Kitovu keeps the list) ----------
+export const CATEGORIES = ['grain', 'legume', 'oilseed', 'tuber', 'vegetable', 'tree_crop', 'oil', 'other'] as const;
+export interface Commodity { code: string; name: string; category: string; unit: string; storable: boolean; max_moisture_pct: string | null; max_storage_months: number; active: boolean; farmers: number; receipts: number }
+export const commodityTable = () => db.all<Commodity>(`SELECT c.code, c.name, c.category, c.unit, c.storable, c.max_moisture_pct::text, c.max_storage_months, c.active,
+    (SELECT count(*)::int FROM farmers f WHERE c.code = ANY(f.commodities)) AS farmers, (SELECT count(*)::int FROM receipts r WHERE r.commodity_code=c.code) AS receipts
+  FROM commodities c ORDER BY c.active DESC, c.name`);
+
+function commodityFields(i: Record<string, string>) {
+  const name = clean(i.name, 60);
+  if (name.length < 3) throw new UserError('Enter the commodity name, e.g. Maize (white).');
+  const category = (CATEGORIES as readonly string[]).includes(i.category) ? i.category : null;
+  if (!category) throw new UserError('Choose a category.');
+  const unit = i.unit === 'l' ? 'l' : 'kg';
+  const m = i.max_moisture_pct?.trim() ? Number(i.max_moisture_pct) : null;
+  if (m !== null && !(Number.isFinite(m) && m > 0 && m <= 80)) throw new UserError('Maximum moisture must be between 0 and 80%.');
+  const months = Number(i.max_storage_months || 6);
+  if (!Number.isInteger(months) || months < 1 || months > 6) throw new UserError('Longest storage term must be 1 to 6 months.');
+  return { name, category, unit, storable: i.storable === '1', max_moisture_pct: m, max_storage_months: months };
+}
+
+export async function createCommodity(a: Actor, i: Record<string, string>) {
+  need(a, 'settings.manage', 'Only Kitovu administrators change the commodity list.');
+  if (!isKitovu(a)) throw new NotAllowed('The commodity list is kept by Kitovu.');
+  const code = clean(i.code, 3).toUpperCase();
+  if (!/^[A-Z]{3}$/.test(code)) throw new UserError('Code: three letters, e.g. GNT for groundnut.');
+  const v = commodityFields(i);
+  if (await db.val('SELECT 1 FROM commodities WHERE code=$1', code)) throw new UserError(`The code ${code} is already used.`);
+  if (await db.val('SELECT 1 FROM commodities WHERE lower(name)=lower($1)', v.name)) throw new UserError(`${v.name} is already on the list.`);
+  await db.run(`INSERT INTO commodities (code, name, category, unit, storable, max_moisture_pct, max_storage_months) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    code, v.name, v.category, v.unit, v.storable, v.max_moisture_pct, v.max_storage_months);
+  await audit(actorOf(a), 'commodity.created', { entity: 'commodity', entityId: code, data: v });
+  return code;
+}
+
+export async function updateCommodity(a: Actor, code: string, i: Record<string, string>) {
+  need(a, 'settings.manage', 'Only Kitovu administrators change the commodity list.');
+  if (!isKitovu(a)) throw new NotAllowed('The commodity list is kept by Kitovu.');
+  const cur = await db.get<any>('SELECT * FROM commodities WHERE code=$1', clean(code, 3).toUpperCase());
+  if (!cur) throw new UserError('Commodity not found.');
+  const v = commodityFields(i);
+  if (await db.val('SELECT 1 FROM commodities WHERE lower(name)=lower($1) AND code<>$2', v.name, cur.code)) throw new UserError(`${v.name} is already on the list.`);
+  const active = i.active === '1';
+  await db.run(`UPDATE commodities SET name=$2, category=$3, unit=$4, storable=$5, max_moisture_pct=$6, max_storage_months=$7, active=$8, updated_at=now() WHERE code=$1`,
+    cur.code, v.name, v.category, v.unit, v.storable, v.max_moisture_pct, v.max_storage_months, active);
+  await audit(actorOf(a), 'commodity.updated', { entity: 'commodity', entityId: cur.code, data: { ...v, active, was: { name: cur.name, active: cur.active, max_storage_months: cur.max_storage_months } } });
 }
 
 export async function addPolicy(a: Actor, code: string, i: Record<string, string>) {
@@ -331,4 +477,5 @@ export async function verifyPolicy(a: Actor, policyId: string) {
 }
 
 export const states = () => db.all<{ code: string; name: string }>('SELECT code, name FROM states ORDER BY name');
-export const commodities = () => db.all<{ code: string; name: string }>('SELECT code, name FROM commodities ORDER BY name');
+/** Commodities offered in forms: active ones only (a retired crop stays on its old records). */
+export const commodities = () => db.all<{ code: string; name: string }>('SELECT code, name FROM commodities WHERE active ORDER BY name');

@@ -12,7 +12,7 @@ import { can } from './rbac';
 import { UserError } from './errors';
 import { saveFile } from './files';
 import { issueOtp, checkOtp } from './otp';
-import { farmerByCode, NotAllowed, type Farmer } from './registry';
+import { farmerByCode, canSeeFarmer, NotAllowed, type Farmer } from './registry';
 import { hashIdNumber, clean, normPhone } from './util';
 import { getSettings } from './settings';
 import { latestCheck } from './agents/kyc-screen';
@@ -294,6 +294,8 @@ export async function canOpenFile(a: Actor, f: { kind: string; entity: string; e
   if (f.kind === 'stock_evidence') return can(m, 'stock.manage') && (m!.org_kind === 'kitovu' || !!(await db.val(`SELECT 1 FROM stacks s JOIN warehouses w ON w.id=s.warehouse_id WHERE s.id=$1 AND wh_access(w.id, $2) UNION SELECT 1 FROM releases x JOIN receipts r ON r.id=x.receipt_id JOIN warehouses w ON w.id=r.warehouse_id WHERE x.id=$1 AND wh_access(w.id, $2)`, f.entity_id, m!.org_id)));
   if (f.kind === 'intake_evidence' && m && m.org_kind !== 'kitovu')
     return can(m, 'stock.manage') && !!(await db.val(`SELECT 1 FROM intakes i JOIN warehouses w ON w.id=i.warehouse_id WHERE i.id=$1 AND wh_access(w.id, $2)`, f.entity_id, m.org_id));
+  // Profile photos: anyone who may see the farmer's record (lenders only with the farmer's consent). Never public.
+  if (f.kind === 'profile_photo') return f.entity === 'farmer' && canSeeFarmer(a, f.entity_id);
   if (!m || m.org_kind !== 'kitovu') return false;           // identity documents never leave Kitovu
   if (f.kind === 'id_document') return can(m, 'kyc.review');
   if (f.kind === 'selfie' || f.kind === 'consent_evidence') return can(m, 'kyc.review') || can(m, 'farmers.edit');

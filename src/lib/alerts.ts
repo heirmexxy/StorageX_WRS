@@ -14,7 +14,7 @@ import { fmtNGN } from './money';
 import { position, entriesOf } from './finance';
 import { referencePrice } from './valuation';
 
-export type AlertKind = 'price_warning' | 'margin_call' | 'liquidation' | 'price_drop' | 'sale_proposed' | 'sale_approved' | 'sale_cancelled' | 'sale_settled' | 'warehouse_condition' | 'warehouse_offline';
+export type AlertKind = 'price_warning' | 'margin_call' | 'liquidation' | 'price_drop' | 'sale_proposed' | 'sale_approved' | 'sale_cancelled' | 'sale_settled' | 'warehouse_condition' | 'warehouse_offline' | 'storage_term';
 export type Level = 'info' | 'warn' | 'urgent';
 export const KIND_LABEL: Record<AlertKind, string> = {
   price_warning: 'Price warning', margin_call: 'Margin call', liquidation: 'Liquidation level', price_drop: 'Price fall',

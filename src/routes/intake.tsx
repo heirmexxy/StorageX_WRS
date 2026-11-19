@@ -9,6 +9,7 @@ import { act } from './admin';
 import { can } from '../lib/rbac';
 import { db } from '../lib/db';
 import { issuable, blockers } from '../lib/receipts';
+import { getSettings } from '../lib/settings';
 
 /** JSON endpoints for the gate app: user mistakes come back as {error}, never as an HTML page. */
 async function api(c: Ctx, fn: () => Promise<unknown>) {
@@ -51,7 +52,8 @@ get('/intakes/:ref', 'auth', async (c) => {
   if (!i) throw new HttpError(404, 'No delivery with that reference.');
   const issue = c.membership?.org_kind === 'kitovu' && can(c.membership, 'receipts.issue') || i.status === 'accepted'
     ? { blockers: can(c.membership, 'receipts.issue') && c.membership?.org_kind === 'kitovu' ? blockers((await issuable(i.id))!, c.actor) : ['Receipts are issued by Kitovu.'],
-        receipts: await db.all(`SELECT receipt_no, net_weight_kg, status::text FROM receipts WHERE intake_id=$1 ORDER BY lot_no`, i.id) }
+        receipts: await db.all(`SELECT receipt_no, net_weight_kg, status::text FROM receipts WHERE intake_id=$1 ORDER BY lot_no`, i.id),
+        term: await (async () => { const max = Number(await db.val('SELECT max_storage_months FROM commodities WHERE code=$1', i.commodity_code) ?? 6); return { max, def: Math.min(max, (await getSettings())['receipts.default_storage_months']) }; })() }
     : undefined;
   c.html(render(<IntakePage c={c} i={i} issue={issue} />));
 });

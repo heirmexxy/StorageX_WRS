@@ -11,7 +11,7 @@ import { UserError } from './errors';
 import { notifyFarmer as notify } from './notify';
 import { getSettings } from './settings';
 import { sign, verify, keyId } from './sign';
-import { receiptPdfBuffer, valueFromRow } from './receipt-doc';
+import { receiptPdfBuffer, valueFromRow, termOf, lagosDay, ymdText as dayText } from './receipt-doc';
 import { pageOffset } from './registry';
 import { clean } from './util';
 import { referencePrice } from './valuation';
@@ -26,6 +26,7 @@ export interface Receipt {
   owner_farmer_id: string | null; farmer_code: string | null; farmer_name: string | null; issued_at: Date | null; closed_at: Date | null; closed_reason: string | null;
   intake_id: string | null; intake_ref: string | null; lot_no: number | null; lots: number | null; signature: string | null; sig_key_id: string | null; issued_by_name: string | null; source: string;
   issue_kobo_per_kg: number | null; issue_value_kobo: number | null; issue_price: any; insurer_name: string | null; policy_number: string | null; cover_to: Date | null; issuer_org_id: string | null; issuer_name: string | null;
+  storage_months: number; storage_until: string;
 }
 
 /** The fixed facts that are signed. Changing any of them breaks the signature. */
@@ -37,7 +38,8 @@ export const verifyUrl = (r: { verify_token: string; signature: string | null })
 const COLS = `r.id, r.receipt_no, r.verify_token, r.status::text AS status, r.commodity_code, c.name AS commodity, r.grade, r.moisture_pct::text, r.bags, r.net_weight_kg::text,
   r.warehouse_id, w.code AS wh_code, w.name AS wh_name, s.name AS wh_state, w.tier AS wh_tier, w.can_back_loans, r.owner_farmer_id, f.code AS farmer_code, f.full_name AS farmer_name,
   r.issued_at, r.closed_at, r.closed_reason, r.intake_id, i.ref AS intake_ref, r.lot_no, r.lots, r.signature, r.sig_key_id, u.full_name AS issued_by_name, r.source,
-  r.issue_kobo_per_kg::float AS issue_kobo_per_kg, r.issue_value_kobo::float AS issue_value_kobo, r.issue_price, ip.insurer_name, ip.policy_number, ip.cover_to, r.issuer_org_id, io.name AS issuer_name`;
+  r.issue_kobo_per_kg::float AS issue_kobo_per_kg, r.issue_value_kobo::float AS issue_value_kobo, r.issue_price, ip.insurer_name, ip.policy_number, ip.cover_to, r.issuer_org_id, io.name AS issuer_name,
+  r.storage_months, to_char(r.storage_until, 'YYYY-MM-DD') AS storage_until`;
 const FROM = `FROM receipts r JOIN commodities c ON c.code=r.commodity_code JOIN warehouses w ON w.id=r.warehouse_id JOIN states s ON s.code=w.state_code
   LEFT JOIN farmers f ON f.id=r.owner_farmer_id LEFT JOIN intakes i ON i.id=r.intake_id LEFT JOIN users u ON u.id=r.issued_by
   LEFT JOIN insurance_policies ip ON ip.id=r.insurance_policy_id
@@ -79,7 +81,7 @@ export async function issuable(intakeId: string) {
   return db.get<any>(
     `SELECT i.id, i.ref, i.status, i.clerk_user_id, i.net_kg::float AS net, i.bags, i.moisture_pct::float AS moisture, i.grade, i.commodity_code, i.captured_at,
             f.id AS farmer_id, f.code AS farmer_code, f.full_name AS farmer_name, f.kyc_level, f.status AS farmer_status, f.phone_e164, f.phone_verified_at,
-            w.id AS wh_id, w.state_code AS wh_state_code, w.code AS wh_code, w.name AS wh_name, w.status AS wh_status, w.tier AS wh_tier, c.name AS commodity, c.max_moisture_pct::float AS max_moisture,
+            w.id AS wh_id, w.state_code AS wh_state_code, w.code AS wh_code, w.name AS wh_name, w.status AS wh_status, w.tier AS wh_tier, c.name AS commodity, c.max_moisture_pct::float AS max_moisture, c.max_storage_months,
             (SELECT count(*)::int FROM receipts r WHERE r.intake_id=i.id AND r.status <> 'cancelled') AS live_receipts
      FROM intakes i JOIN farmers f ON f.id=i.farmer_id JOIN warehouses w ON w.id=i.warehouse_id JOIN commodities c ON c.code=i.commodity_code WHERE i.id=$1`, intakeId);
 }
@@ -123,7 +125,71 @@ export function lotsFor(net: number, bags: number, input: string) {
   return lots;
 }
 
-export async function issueFromIntake(a: Actor, intakeId: string, split = '') {
+// ---------- storage term ----------
+const OPEN = ['closed', 'settled', 'cancelled', 'expired'];
+export { termOf, lagosDay, dayText as ymdText };
+/** The term for a new receipt: the issuer's choice, else the default, never past the crop's limit. */
+export async function chooseTerm(months: unknown, cropMax: number) {
+  const def = Math.min((await getSettings())['receipts.default_storage_months'], cropMax);
+  if (months === undefined || months === null || String(months).trim() === '') return def;
+  const n = Number(months);
+  if (!Number.isInteger(n) || n < 1 || n > 6) throw new UserError('Storage term must be 1 to 6 months.');
+  if (n > cropMax) throw new UserError(`This crop can be stored for at most ${cropMax} month${cropMax === 1 ? '' : 's'} on one receipt.`);
+  return n;
+}
+
+/** Extend a live receipt's storage term. Kitovu, or the company that issued it. Extensions are events on the receipt. */
+export async function extendTerm(a: Actor, no: string, i: { months?: string; note?: string }) {
+  const r = await receiptByNo(a, no);
+  if (!r) throw new UserError('Receipt not found.');
+  const own = a.membership?.org_kind === 'issuer' && r.issuer_org_id === a.membership.org_id;
+  if (!(isKitovu(a) || own) || !can(a.membership, 'receipts.issue')) throw new UserError('Only Kitovu, or the company that issued the receipt, can extend its storage term.');
+  if (OPEN.includes(r.status)) throw new UserError(`This receipt is ${r.status}; its term cannot be extended.`);
+  const n = Number(i.months);
+  if (!Number.isInteger(n) || n < 1 || n > 6) throw new UserError('Extend by 1 to 6 months.');
+  const cropMax = Number(await db.val('SELECT max_storage_months FROM commodities WHERE code=$1', r.commodity_code));
+  if (n > cropMax) throw new UserError(`This crop can be extended by at most ${cropMax} month${cropMax === 1 ? '' : 's'} at a time.`);
+  const note = clean(i.note, 300);
+  if (note.length < 5) throw new UserError('Say why the term is extended (e.g. the stock was inspected and is in good condition).');
+  const until = (await db.val<string>(`SELECT to_char((GREATEST($1::date, $2::date) + make_interval(months => $3))::date, 'YYYY-MM-DD')`, r.storage_until, lagosDay(), n))!;
+  const limit = (await db.val<string>(`SELECT to_char(($1::timestamptz AT TIME ZONE 'Africa/Lagos')::date + interval '18 months', 'YYYY-MM-DD')`, r.issued_at ?? new Date()))!;
+  if (until > limit) throw new UserError(`A receipt can be stored for at most 18 months from issue (to ${dayText(limit)}). Sell or collect the stock instead.`);
+  await tx(async () => {
+    await db.run('UPDATE receipts SET storage_until=$2, term_reminded_on=NULL WHERE id=$1', r.id, until);
+    await db.run(`INSERT INTO receipt_events (receipt_id, event_type, occurred_at, actor, data) VALUES ($1,'term_extended',now(),$2,$3)`, r.id, `user:${a.user.id}`,
+      JSON.stringify({ from: r.storage_until, to: until, months: n, note }));
+    await audit(actorOf(a), 'receipt.term_extended', { entity: 'receipt', entityId: r.id, data: { receipt_no: r.receipt_no, from: r.storage_until, to: until } });
+  });
+  if (r.owner_farmer_id) setImmediate(() => void notify(r.owner_farmer_id!, 'storage_extended', `${r.receipt_no}:${until}`, { receipt: r.receipt_no, until: dayText(until) }));
+  return until;
+}
+
+/** Daily: remind the farmer, and alert the lender and Kitovu, when a receipt's term is about to end or has ended. */
+export async function termSweep(today = lagosDay()) {
+  const { raise } = await import('./alerts');
+  const warn = (await getSettings())['receipts.term_warn_days'];
+  const rows = await db.all<any>(`SELECT r.id, r.receipt_no, r.status::text AS status, r.owner_farmer_id, r.storage_months, to_char(r.storage_until,'YYYY-MM-DD') AS storage_until,
+      to_char(r.term_reminded_on,'YYYY-MM-DD') AS reminded, c.name AS crop, w.name AS wh_name,
+      (SELECT ln.lender_org_id FROM liens li JOIN loans ln ON ln.id=li.loan_id WHERE li.receipt_id=r.id AND li.released_at IS NULL LIMIT 1) AS lender_org
+    FROM receipts r JOIN commodities c ON c.code=r.commodity_code JOIN warehouses w ON w.id=r.warehouse_id
+    WHERE r.status NOT IN ('closed','settled','cancelled','expired') AND r.storage_until <= $1::date + $2::int`, today, warn);
+  let reminded = 0, ended = 0;
+  for (const r of rows) {
+    const t = termOf(r, today, warn);
+    if (t.state === 'past') {
+      if (await raise(r.lender_org, { kind: 'storage_term', level: 'warning', title: `Storage term ended on ${r.receipt_no}`, body: `${r.crop} at ${r.wh_name}: the term ended on ${dayText(r.storage_until)}. Sell, collect or extend it.`, link: `/receipts/${r.receipt_no}`, key: `term-ended:${r.receipt_no}:${r.storage_until}` })) ended++;
+      continue;
+    }
+    if (r.reminded && r.reminded >= r.storage_until) continue;           // already reminded for this term
+    if (r.owner_farmer_id) await notify(r.owner_farmer_id, 'storage_term_ending', `${r.receipt_no}:${r.storage_until}`, { receipt: r.receipt_no, crop: r.crop, warehouse: r.wh_name, until: dayText(r.storage_until), days: String(t.days) });
+    await raise(r.lender_org, { kind: 'storage_term', level: 'info', title: `Storage term ends in ${t.days} days on ${r.receipt_no}`, body: `${r.crop} at ${r.wh_name}, to ${dayText(r.storage_until)}.`, link: `/receipts/${r.receipt_no}`, key: `term-ending:${r.receipt_no}:${r.storage_until}` });
+    await db.run('UPDATE receipts SET term_reminded_on=$2 WHERE id=$1', r.id, r.storage_until);
+    reminded++;
+  }
+  return { reminded, ended };
+}
+
+export async function issueFromIntake(a: Actor, intakeId: string, split = '', months?: unknown) {
   const issuerOrg = a.membership?.org_kind === 'issuer' ? a.membership.org_id : null;
   if (!(isKitovu(a) || issuerOrg) || !can(a.membership, 'receipts.issue')) throw new UserError('Only Kitovu staff or a certified issuer’s receipt officers can issue receipts.');
   return tx(async () => {
@@ -134,7 +200,9 @@ export async function issueFromIntake(a: Actor, intakeId: string, split = '') {
     const b = blockers(i, a);
     if (b.length) throw new UserError(b.join(' '));
     const lots = lotsFor(i.net, i.bags, split);
+    const term = await chooseTerm(months, Number(i.max_storage_months ?? 6));
     const now = new Date();
+    const until = (await db.val<string>(`SELECT to_char(($1::date + make_interval(months => $2))::date, 'YYYY-MM-DD')`, lagosDay(now), term))!;
     const ymd = now.toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', year: '2-digit', month: '2-digit', day: '2-digit' }).split('/').reverse().join('');
     const parts = String(i.wh_code).split('-');
     const prefix = `SX-${parts[1]}-${parts[2]}-${ymd}-`;
@@ -157,13 +225,13 @@ export async function issueFromIntake(a: Actor, intakeId: string, split = '') {
       const sig = sign(signedFacts({ receipt_no: no, verify_token: token, commodity_code: i.commodity_code, net_weight_kg: lots[k].kg, wh_code: i.wh_code, issued_at: now }));
       const row = (await db.get<{ id: string }>(
         `INSERT INTO receipts (receipt_no, verify_token, depositor_farmer_id, owner_farmer_id, warehouse_id, commodity_code, grade, moisture_pct, bags, net_weight_kg, status, issued_at,
-           intake_id, lot_no, lots, issued_by, source, signature, sig_key_id, issue_kobo_per_kg, issue_value_kobo, issue_price, insurance_policy_id, unit_price_kobo, value_kobo, issuer_org_id)
-         VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,'issued',$10,$11,$12,$13,$14,'app',$15,$16,$17,$18,$19,$20,$17,$18,$21) RETURNING id`,
+           intake_id, lot_no, lots, issued_by, source, signature, sig_key_id, issue_kobo_per_kg, issue_value_kobo, issue_price, insurance_policy_id, unit_price_kobo, value_kobo, issuer_org_id, storage_months, storage_until)
+         VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,'issued',$10,$11,$12,$13,$14,'app',$15,$16,$17,$18,$19,$20,$17,$18,$21,$22,$23) RETURNING id`,
         no, token, i.farmer_id, i.wh_id, i.commodity_code, i.grade, i.moisture, lots[k].bags, lots[k].kg, now, i.id, k + 1, lots.length, a.user.id, sig, keyId(),
-        ref.kobo_per_kg, ref.kobo_per_kg ? valueKobo(lots[k].kg, ref.kobo_per_kg) : null, basis ? JSON.stringify(basis) : null, policy ?? null, issuerOrg))!;
+        ref.kobo_per_kg, ref.kobo_per_kg ? valueKobo(lots[k].kg, ref.kobo_per_kg) : null, basis ? JSON.stringify(basis) : null, policy ?? null, issuerOrg, term, until))!;
       await db.run(`INSERT INTO receipt_events (receipt_id, event_type, occurred_at, actor, data) VALUES ($1,'issued',$2,$3,$4)`, row.id, now, `user:${a.user.id}`,
         JSON.stringify({ receipt_no: no, delivery: i.ref, farmer: i.farmer_code, warehouse: i.wh_code, commodity: i.commodity_code, net_kg: lots[k].kg, bags: lots[k].bags, grade: i.grade, moisture_pct: i.moisture, lot: `${k + 1}/${lots.length}`, signature: sig,
-          value_at_storage: ref.kobo_per_kg ? { kobo_per_kg: ref.kobo_per_kg, kobo: valueKobo(lots[k].kg, ref.kobo_per_kg) } : null, insurance_policy: policy ?? null, issuer: issuerOrg ? a.membership!.org_name : 'Kitovu' }));
+          value_at_storage: ref.kobo_per_kg ? { kobo_per_kg: ref.kobo_per_kg, kobo: valueKobo(lots[k].kg, ref.kobo_per_kg) } : null, insurance_policy: policy ?? null, storage: { months: term, until }, issuer: issuerOrg ? a.membership!.org_name : 'Kitovu' }));
       if (issuerOrg && ref.kobo_per_kg) {
         const bp = (await getSettings())['fees.issuance_bp'];
         await charge(issuerOrg, 'issuance', Math.round(valueKobo(lots[k].kg, ref.kobo_per_kg) * bp / 10_000), no, { bp, value_at_storage: valueKobo(lots[k].kg, ref.kobo_per_kg) }, a.user.id);
@@ -171,7 +239,7 @@ export async function issueFromIntake(a: Actor, intakeId: string, split = '') {
       issued.push({ no, token, kg: lots[k].kg, sig });
     }
     await audit(actorOf(a), 'receipt.issued', { entity: 'intake', entityId: i.id, data: { delivery: i.ref, receipts: issued.map((x) => x.no) } });
-    return { receipts: issued, farmer: i, commodity: i.commodity };
+    return { receipts: issued, farmer: i, commodity: i.commodity, term: { months: term, until } };
   });
 }
 
@@ -211,7 +279,7 @@ export const PUBLIC_STATUS: Record<string, { label: string; tone: 'ok' | 'warn' 
   cancelled: { label: 'Cancelled', tone: 'bad', note: 'This receipt was cancelled and is not valid.' },
   expired: { label: 'Expired', tone: 'bad', note: 'This receipt has expired.' },
 };
-export const EVENT_LABEL: Record<string, string> = { issued: 'Issued', cancelled: 'Cancelled', released: 'Part withdrawn', pledged: 'Pledged to a lender', financed: 'Loan paid out', lien_released: 'Pledge released', sale_approved: 'Sale agreed', sale_cancelled: 'Sale cancelled', settled: 'Sold and settled', review_started: 'Put under review', review_ended: 'Review ended', legacy_issued: 'Issued (old system)', legacy_closed: 'Closed (old system)', liquidated: 'Liquidated', closed: 'Closed' };
+export const EVENT_LABEL: Record<string, string> = { issued: 'Issued', cancelled: 'Cancelled', released: 'Part withdrawn', pledged: 'Pledged to a lender', financed: 'Loan paid out', lien_released: 'Pledge released', sale_approved: 'Sale agreed', sale_cancelled: 'Sale cancelled', settled: 'Sold and settled', review_started: 'Put under review', review_ended: 'Review ended', legacy_issued: 'Issued (old system)', legacy_closed: 'Closed (old system)', liquidated: 'Liquidated', closed: 'Closed', term_extended: 'Storage term extended' };
 
 export async function passport(token: string, sig: string | undefined, ip: string) {
   if (!(await rateLimit(`passport:${ip}`, 120, 600))) throw new UserError('Too many checks from this network. Wait a few minutes.');
@@ -238,6 +306,7 @@ export async function passport(token: string, sig: string | undefined, ip: strin
     value_at_storage: r.issue_value_kobo != null ? { kobo: Number(r.issue_value_kobo), per_kg: Number(r.issue_kobo_per_kg) } : null,
     value_today: today && !['closed', 'settled', 'cancelled', 'expired'].includes(r.status) ? { kobo: Number(today.market_value_kobo), per_kg: Number(today.kobo_per_kg), on: today.valued_on } : null,
     issuer: r.issuer_name ?? null,
+    term: termOf(r, lagosDay(), (await getSettings())['receipts.term_warn_days']),
     insurance: r.insurer_name ? `${r.insurer_name}${r.policy_number ? `, policy ${r.policy_number}` : ''}${r.cover_to ? `, cover to ${new Date(r.cover_to).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}` : null,
   };
 }
@@ -257,6 +326,7 @@ export async function receiptPdf(a: Actor, no: string) {
     intake_ref: r.intake_ref, lot: r.lots && r.lots > 1 ? `receipt ${r.lot_no} of ${r.lots}` : null,
     issued_by: r.issued_by_name, received_by: extra?.clerk ?? null, url: verifyUrl(r), key_id: r.sig_key_id, signature: r.signature,
     issuer: r.issuer_name ?? null, value: valueFromRow(r), insurance: r.insurer_name ? { insurer: r.insurer_name, policy_no: r.policy_number, cover_to: r.cover_to } : null,
+    term: { months: r.storage_months, until: r.storage_until },
   });
   await audit(actorOf(a), 'receipt.printed', { entity: 'receipt', entityId: r.id, data: { receipt_no: r.receipt_no } });
   return { pdf, name: `${r.receipt_no}.pdf` };

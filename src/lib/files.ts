@@ -10,7 +10,7 @@ import { encryptBuffer, decryptBuffer } from './util';
 import type { Upload } from './http';
 
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
-export type FileKind = 'id_document' | 'selfie' | 'consent_evidence' | 'warehouse_document' | 'other';
+export type FileKind = 'id_document' | 'selfie' | 'consent_evidence' | 'warehouse_document' | 'intake_evidence' | 'stock_evidence' | 'price_evidence' | 'sale_evidence' | 'profile_photo' | 'other';
 export class FileError extends UserError {}
 
 export function sniff(buf: Buffer): 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf' | null {

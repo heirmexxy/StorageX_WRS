@@ -12,7 +12,7 @@ export interface Endpoint {
 const RECEIPT = {
   receipt_no: 'SX-OY-ISY-261104-0018', status: 'financed', commodity: { code: 'MAZ', name: 'Maize (white)' }, grade: 'A', moisture_pct: 12.8,
   net_weight_kg: 2450, bags: 49, warehouse: { code: 'WH-OY-ISY-01', name: 'Iseyin Grain Store' }, issued_at: '2026-11-04T09:42:00.000Z', issuer: 'Kitovu',
-  value_at_storage: { kobo: 142100000, kobo_per_kg: 58000 }, value_today: { kobo: 149450000, kobo_per_kg: 61000, on: '2026-11-18' },
+  storage: { months: 6, until: '2027-05-04', days_left: 166, state: 'in_term' }, value_at_storage: { kobo: 142100000, kobo_per_kg: 58000 }, value_today: { kobo: 149450000, kobo_per_kg: 61000, on: '2026-11-18' },
   insurance: { insurer: 'Stock cover for fire, flood and theft', policy_no: 'SXW-ISY-2026-07', cover_to: '2027-06-30' }, pledged: { to_you: true, loan_no: 'LN-FUNDCO-00012' },
   check_url: 'https://storagex.com.ng/r/3f1c…',
 };

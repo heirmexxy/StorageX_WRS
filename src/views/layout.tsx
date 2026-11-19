@@ -57,6 +57,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/admin/orgs', label: 'Organisations', perm: 'orgs.manage' },
     { href: '/admin/audit', label: 'Audit log', perm: 'audit.view' },
     { href: '/admin/settings', label: 'Settings', perm: 'settings.manage' },
+    { href: '/commodities', label: 'Commodities', perm: 'settings.manage', kitovu: true },
     { href: '/developers', label: 'API documentation' },
   ] },
   { group: 'My account', items: [{ href: '/account', label: 'My account' }] },

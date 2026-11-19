@@ -9,7 +9,7 @@ import { fileRow, readFile } from '../lib/files';
 import { audit } from '../lib/audit';
 import { actorOf } from '../lib/auth';
 import { render } from '../views/layout';
-import { FarmersPage, FarmerNewPage, FarmerPage, KycReviewPage, ReviewQueuePage, FieldPartnersPage, WarehousesPage, WarehousePage, type FarmerView } from '../views/registry';
+import { FarmersPage, FarmerNewPage, FarmerPage, KycReviewPage, ReviewQueuePage, FieldPartnersPage, WarehousesPage, WarehousePage, CommoditiesPage, type FarmerView } from '../views/registry';
 import { ApplyPage, ApplyThanksPage, ApplicationsPage } from '../views/apply';
 import { act } from './admin';
 import { deliveriesOf } from '../lib/intake';
@@ -44,7 +44,7 @@ get('/farmers', 'perm:farmers.view', async (c) => {
 
 get('/farmers/new', 'perm:farmers.edit', async (c) => c.html(render(<FarmerNewPage c={c} states={await R.states()} crops={await R.commodities()} />)));
 post('/farmers/new', 'perm:farmers.edit', async (c) => {
-  try { c.setFlash('ok', 'Farmer registered. Next: confirm their phone.'); c.redirect(`/farmers/${await R.createFarmer(c.actor, farmerBody(c))}`); }
+  try { const code = await R.createFarmer(c.actor, farmerBody(c), c.files.photo); c.setFlash('ok', 'Registered. Next: confirm their phone.'); c.redirect(`/farmers/${code}`); }
   catch (e) {
     if (!(e instanceof UserError)) throw e;
     const values = { ...c.body, phone_e164: c.body.phone, commodities: c.multi.commodities ?? [] };
@@ -74,6 +74,7 @@ async function farmerView(c: Ctx, extra: Partial<FarmerView> = {}) {
 }
 get('/farmers/:code', 'perm:farmers.view', async (c) => c.html(render(<FarmerPage c={c} v={await farmerView(c)} />)));
 const farmerId = async (c: Ctx) => { const f = await R.farmerByCode(c.actor, c.params.code); if (!f) throw new HttpError(404, 'No farmer with that code, or you cannot see them.'); return f.id; };
+post('/farmers/:code/photo', 'perm:farmers.edit', (c) => act(c, `/farmers/${c.params.code}`, async () => { await R.setFarmerPhoto(c.actor, c.params.code, c.files.photo); return 'Profile photo saved.'; }));
 post('/farmers/:code/messaging', 'perm:farmers.edit', async (c) => act(c, `/farmers/${c.params.code}`, async () => { await N.setFarmerMessaging(c.actor, await farmerId(c), c.body); return 'Message settings saved.'; }));
 post('/farmers/:code/ussd-reset', 'perm:farmers.edit', async (c) => act(c, `/farmers/${c.params.code}`, async () => { await U.resetPin(c.actor, await farmerId(c), c.body.reason); return 'PIN reset. The farmer has been sent a text.'; }));
 
@@ -143,7 +144,24 @@ post('/field-partners/:id/verify', 'perm:field_partners.manage', (c) => act(c, '
 post('/field-partners/:id/suspend', 'perm:field_partners.manage', (c) => act(c, '/field-partners', async () => { await R.setFieldPartnerStatus(c.actor, c.params.id, 'suspended'); return 'Suspended.'; }));
 
 // ---------- warehouses ----------
-get('/warehouses', 'perm:warehouses.view', async (c) => c.html(render(<WarehousesPage c={c} rows={await R.listWarehouses(c.actor)} />)));
+const whForm = async (c: Ctx) => c.membership?.org_kind === 'kitovu' && can(c.membership, 'warehouses.edit')
+  ? { states: await R.states(), operators: await R.warehouseOperators(), crops: await R.commodities() } : undefined;
+get('/warehouses', 'perm:warehouses.view', async (c) => c.html(render(<WarehousesPage c={c} rows={await R.listWarehouses(c.actor)} form={await whForm(c)} />)));
+post('/warehouses', 'perm:warehouses.edit', async (c) => {
+  try { const code = await R.createWarehouse(c.actor, { ...c.body, commodities: c.multi.commodities ?? [] }); c.setFlash('ok', `Added as ${code}. Next: add its insurance policy, then certify it once GPS and capacity are in.`); c.redirect(`/warehouses/${code}`); }
+  catch (e) {
+    if (!(e instanceof UserError)) throw e;
+    c.html(render(<WarehousesPage c={c} rows={await R.listWarehouses(c.actor)} form={await whForm(c)} error={e.message} values={{ ...c.body, commodities: c.multi.commodities ?? [] }} />), 400);
+  }
+});
+
+// ---------- commodities ----------
+get('/commodities', 'perm:settings.manage', async (c) => {
+  if (c.membership?.org_kind !== 'kitovu') throw new HttpError(403, 'The commodity list is kept by Kitovu.');
+  c.html(render(<CommoditiesPage c={c} rows={await R.commodityTable()} />));
+});
+post('/commodities', 'perm:settings.manage', (c) => act(c, '/commodities', async () => `Added ${await R.createCommodity(c.actor, c.body)}. It can now be chosen for farmers, deliveries and prices.`));
+post('/commodities/:code', 'perm:settings.manage', (c) => act(c, '/commodities', async () => { await R.updateCommodity(c.actor, c.params.code, c.body); return 'Saved.'; }));
 get('/warehouses/:code', 'perm:warehouses.view', async (c) => {
   const w = await R.warehouseByCode(c.actor, c.params.code);
   if (!w) throw new HttpError(404, 'No warehouse with that code.');

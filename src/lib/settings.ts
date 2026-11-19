@@ -60,6 +60,10 @@ export const DEFAULTS = {
   'wareguard.max_rh_pct': 70,
   'wareguard.door_open_minutes': 30,
   'wareguard.offline_minutes': 60,
+  /** Storage term on a new receipt (months, 1 to 6) unless the issuer chooses another; capped by the crop's limit. */
+  'receipts.default_storage_months': 6,
+  /** Warn the farmer, the lender and Kitovu this many days before a receipt's storage term ends. */
+  'receipts.term_warn_days': 14,
 };
 export type SettingKey = keyof typeof DEFAULTS;
 export type Settings = typeof DEFAULTS;
@@ -99,6 +103,8 @@ export const LABELS: Record<SettingKey, string> = {
   'wareguard.max_rh_pct': 'WareGuard: alert above this relative humidity (%)',
   'wareguard.door_open_minutes': 'WareGuard: alert when a door stays open longer than (minutes)',
   'wareguard.offline_minutes': 'WareGuard: alert when a device has sent nothing for (minutes)',
+  'receipts.default_storage_months': 'Storage term on a new receipt (months, 1 to 6)',
+  'receipts.term_warn_days': 'Warn before a receipt’s storage term ends (days)',
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -124,7 +130,7 @@ export async function saveSettings(a: Actor, input: Partial<Record<SettingKey, u
     }
     else if (typeof def === 'number') {
       const v = Number(input[k]);
-      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000], 'fees.issuance_bp': [0, 500], 'fees.origination_bp': [0, 500], 'fees.certification_kobo': [0, 1e11], 'issuers.guarantee_pct': [0, 50], 'issuers.guarantee_min_kobo': [0, 1e12], 'notify.due_days': [1, 30], 'inspector.farmer_30d_kg': [1000, 1000000], 'alerts.ltv_warning_gap_pct': [1, 30], 'wareguard.max_temp_c': [15, 45], 'wareguard.max_rh_pct': [40, 95], 'wareguard.door_open_minutes': [5, 240], 'wareguard.offline_minutes': [10, 1440] } as Record<string, number[]>)[k] ?? [1, 180];
+      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000], 'fees.issuance_bp': [0, 500], 'fees.origination_bp': [0, 500], 'fees.certification_kobo': [0, 1e11], 'issuers.guarantee_pct': [0, 50], 'issuers.guarantee_min_kobo': [0, 1e12], 'notify.due_days': [1, 30], 'inspector.farmer_30d_kg': [1000, 1000000], 'alerts.ltv_warning_gap_pct': [1, 30], 'wareguard.max_temp_c': [15, 45], 'wareguard.max_rh_pct': [40, 95], 'wareguard.door_open_minutes': [5, 240], 'wareguard.offline_minutes': [10, 1440], 'receipts.default_storage_months': [1, 6], 'receipts.term_warn_days': [1, 60] } as Record<string, number[]>)[k] ?? [1, 180];
       if (!Number.isFinite(v) || v < lo || v > hi) throw new UserError(`${LABELS[k]}: between ${lo} and ${hi}.`);
       next[k] = v;
     }

@@ -83,6 +83,9 @@ async function main() {
     case 'remind': {
       const r = await sendReminders();
       console.log(`reminders sent: ${r.soon} due soon, ${r.overdue} overdue`);
+      const { termSweep } = await import('./lib/receipts');
+      const t = await termSweep();
+      console.log(`storage terms: ${t.reminded} ending soon, ${t.ended} newly past their term`);
       break;
     }
     case 'revalue': {

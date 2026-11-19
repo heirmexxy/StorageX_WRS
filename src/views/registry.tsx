@@ -1,8 +1,8 @@
 import type { Ctx } from '../lib/http';
 import { can } from '../lib/rbac';
 import { fmtNGN } from '../lib/money';
-import type { Farmer, Issue, FieldPartner, Warehouse } from '../lib/registry';
-import { mask } from '../lib/registry';
+import type { Farmer, Issue, FieldPartner, Warehouse, Commodity } from '../lib/registry';
+import { mask, CATEGORIES } from '../lib/registry';
 import { ID_TYPES, REJECT_REASONS, CONSENT_TEXT, type Submission } from '../lib/kyc';
 import { Page, Csrf, Field, Select, fmtDate, fmtDay, Pager } from './layout';
 import { EXPLAIN } from '../lib/agents/data-steward';
@@ -55,7 +55,8 @@ function FarmerFields({ f, states, crops, partner }: { f?: Partial<Farmer>; stat
   return (
     <>
       <div className="grid">
-        <Field label="Full name" name="full_name" value={f?.full_name} required hint="First name and surname, as on their ID" />
+        <Select label="Who is storing" name="kind" value={f?.kind ?? 'individual'} options={[['individual', 'A farmer (individual)'], ['agribusiness', 'An agribusiness (company, co-op or enterprise)']]} />
+        <Field label="Full name, or business name" name="full_name" value={f?.full_name} required hint="A farmer: first name and surname as on their ID. An agribusiness: its registered name." />
         <Field label="Phone" name="phone" type="tel" value={f?.phone_e164 ?? ''} inputMode="tel" hint="Their own or a family phone they can reach" />
         <Select label="Sex" name="sex" value={f?.sex} blank="Not recorded" options={[['female', 'Female'], ['male', 'Male']]} />
         <Field label="Year of birth" name="year_of_birth" value={f?.year_of_birth ?? ''} inputMode="numeric" />
@@ -63,6 +64,12 @@ function FarmerFields({ f, states, crops, partner }: { f?: Partial<Farmer>; stat
         <Field label="Community / village" name="community" value={f?.community ?? ''} />
         {partner && <Field label="Field partner code (optional)" name="field_partner_code" hint="SXA-… of the agent who brought this farmer" />}
       </div>
+      <fieldset className="grid">
+        <legend>Agribusiness only</legend>
+        <Field label="Registration number" name="business_reg_no" value={f?.business_reg_no ?? ''} hint="As on the certificate, e.g. RC 1348965 or BN 3456789" />
+        <Field label="Contact person" name="contact_person" value={f?.contact_person ?? ''} hint="Full name of who speaks for the business; their ID is checked" />
+        <Field label="Their role" name="contact_role" value={f?.contact_role ?? ''} hint="e.g. Managing director, Co-op secretary" />
+      </fieldset>
       <fieldset className="crops">
         <legend>Crops they grow</legend>
         {crops.map((k) => (
@@ -78,9 +85,10 @@ export function FarmerNewPage({ c, states, crops, error, values, duplicate }: { 
     <Page c={c} title="Register a farmer">
       <h1>Register a farmer</h1>
       {error && <p className="flash error">{error}</p>}
-      <form method="post" action="/farmers/new" className="card">
+      <form method="post" action="/farmers/new" className="card" encType="multipart/form-data">
         <Csrf c={c} />
         <FarmerFields f={values} states={states} crops={crops} partner />
+        <Field label="Profile photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp" capture="user" hint="A clear face photo (for an agribusiness, the contact person). Optional now; add it later from the record." />
         {duplicate && <label className="check"><input type="checkbox" name="confirm_duplicate" value="1" /> This is a different person who shares the phone</label>}
         <p className="muted">After saving you can confirm the phone by SMS code and start the identity check.</p>
         <button className="primary">Save farmer</button>
@@ -117,6 +125,21 @@ export function FarmerPage({ c, v }: { c: Ctx; v: FarmerView }) {
       <div className="cols">
         <section className="card">
           <h2>Details</h2>
+          <div className="profile-head">
+            {f.profile_photo_id ? <img className="avatar" src={`/files/${f.profile_photo_id}`} alt={`Photo of ${f.kind === 'agribusiness' ? f.contact_person ?? f.full_name : f.full_name}`} width="96" height="96" />
+              : <span className="avatar avatar-empty" aria-hidden="true">{f.full_name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()}</span>}
+            <div>
+              <b>{f.kind === 'agribusiness' ? 'Agribusiness' : 'Farmer'}</b>
+              {f.kind === 'agribusiness' && <p className="small">{[f.business_reg_no, f.contact_person && `contact: ${f.contact_person}${f.contact_role ? `, ${f.contact_role}` : ''}`].filter(Boolean).join(' · ')}</p>}
+              {edit && (
+                <form method="post" action={`/farmers/${f.code}/photo`} encType="multipart/form-data" className="row">
+                  <Csrf c={c} />
+                  <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" capture="user" aria-label="Profile photo" required />
+                  <button>{f.profile_photo_id ? 'Replace photo' : 'Add photo'}</button>
+                </form>
+              )}
+            </div>
+          </div>
           {edit ? (
             <form method="post" action={`/farmers/${f.code}`}>
               <Csrf c={c} />
@@ -494,18 +517,50 @@ export function FieldPartnersPage({ c, rows, states, networks }: { c: Ctx; rows:
 }
 
 // ---------- warehouses ----------
-export function WarehousesPage({ c, rows }: { c: Ctx; rows: Warehouse[] }) {
+type WhForm = { states: Opt[]; operators: { id: string; name: string; kind: string }[]; crops: Opt[] };
+export function WarehousesPage({ c, rows, form, error, values }: { c: Ctx; rows: Warehouse[]; form?: WhForm; error?: string; values?: any }) {
+  const v = values ?? {};
   return (
     <Page c={c} title="Warehouses">
       <h1>Warehouses</h1>
       <p className="muted">Tier A: Kitovu-operated · B: partner-operated, Kitovu-managed · C: two-key village store · D: listed only (never backs loans).</p>
+      {error && <p className="flash error">{error}</p>}
+      {form && (
+        <details className="card" open={!!error || !rows.length}>
+          <summary><b>Add a warehouse</b></summary>
+          <form method="post" action="/warehouses">
+            <Csrf c={c} />
+            <div className="grid">
+              <Field label="Warehouse name" name="name" value={v.name} required hint="As the community knows it, e.g. Iseyin Grain Store" />
+              <Select label="Run by" name="operator_org_id" value={v.operator_org_id} blank="Choose…" options={form.operators.map((o) => [o.id, `${o.name}${o.kind === 'kitovu' ? '' : ` (${o.kind.replace(/_/g, ' ')})`}`])} hint="New operator? Add it under Organisations first." />
+              <Select label="Tier" name="tier" value={v.tier ?? 'B'} options={[['A', 'A · Kitovu-operated'], ['B', 'B · partner-operated'], ['C', 'C · village store'], ['D', 'D · listed only']]} />
+              <Select label="State" name="state_code" value={v.state_code} blank="Choose…" options={form.states.map((s) => [s.code, s.name])} />
+              <Field label="Local government area" name="lga" value={v.lga} />
+              <Field label="Town" name="town" value={v.town} required />
+              <Field label="Site code (optional)" name="site_code" value={v.site_code} hint="3–6 letters for the warehouse code; blank = from the town" />
+              <Field label="Address" name="address_text" value={v.address_text} hint="Street or landmark" />
+              <Field label="Latitude" name="lat" value={v.lat} inputMode="decimal" hint="From the phone’s map at the gate, e.g. 7.9667" />
+              <Field label="Longitude" name="lng" value={v.lng} inputMode="decimal" hint="e.g. 3.6000" />
+              <Field label="Capacity (tonnes)" name="capacity_tonnes" value={v.capacity_tonnes} inputMode="decimal" />
+              <Field label="Site contact" name="contact_name" value={v.contact_name} />
+              <Field label="Contact phone" name="contact_phone" value={v.contact_phone} type="tel" />
+            </div>
+            <fieldset className="crops">
+              <legend>Crops it stores</legend>
+              {form.crops.map((k) => <label key={k.code} className="check"><input type="checkbox" name="commodities" value={k.code} defaultChecked={(v.commodities ?? []).includes(k.code)} /> {k.name}</label>)}
+            </fieldset>
+            <p className="muted small">The warehouse code is made from the state, site and a number, e.g. WH-OY-ISY-01. It starts as onboarding; certify it on its page once GPS, capacity and insurance are in. Crops missing from the list are added under <a href="/commodities">Commodities</a>.</p>
+            <button className="primary">Add warehouse</button>
+          </form>
+        </details>
+      )}
       <section className="card">
         <table>
           <thead><tr><th>Code</th><th>Name</th><th>Operator</th><th>Tier</th><th>Status</th><th>Capacity</th><th>Can back loans</th></tr></thead>
           <tbody>{rows.map((w) => (
             <tr key={w.id}>
               <td><a href={`/warehouses/${w.code}`} className="mono">{w.code}</a></td>
-              <td>{w.name}{w.needs_review && <> <span className="badge warn">review</span></>}<br /><small className="muted">{[w.town, w.state_name].filter(Boolean).join(', ')}</small></td>
+              <td>{w.name}{w.needs_review && <> <span className="badge warn">review</span></>}<br /><small className="muted">{[w.town, w.lga_name, w.state_name].filter(Boolean).join(', ')}</small></td>
               <td>{w.operator_name}</td><td>{w.tier}</td><td>{w.status}</td>
               <td>{w.capacity_kg ? `${(Number(w.capacity_kg) / 1000).toLocaleString('en-NG')} t` : '—'}</td>
               <td>{w.can_back_loans ? 'Yes' : 'No'}</td>
@@ -530,6 +585,7 @@ export function WarehousePage({ c, w, policies, issues }: { c: Ctx; w: Warehouse
             <Field label="Name" name="name" value={w.name} required />
             <Select label="Tier" name="tier" value={w.tier} options={[['A', 'A · Kitovu-operated'], ['B', 'B · partner-operated'], ['C', 'C · village store'], ['D', 'D · listed only']]} />
             <Select label="Status" name="status" value={w.status} options={['onboarding', 'certified', 'active', 'dormant', 'closed'].map((s) => [s, s])} hint="Certified/active needs GPS and capacity." />
+            <Field label="Local government area" name="lga" value={w.lga_name} />
             <Field label="Town" name="town" value={w.town} />
             <Field label="Address" name="address_text" value={w.address_text} />
             <Field label="Latitude" name="lat" value={w.lat} inputMode="decimal" hint="e.g. 9.6139" />
@@ -543,7 +599,7 @@ export function WarehousePage({ c, w, policies, issues }: { c: Ctx; w: Warehouse
         ) : (
           <dl className="facts">
             <dt>Operator</dt><dd>{w.operator_name}</dd><dt>Tier · status</dt><dd>{w.tier} · {w.status}</dd>
-            <dt>Location</dt><dd>{[w.address_text, w.town, w.state_name].filter(Boolean).join(', ')}{w.lat && ` (${w.lat}, ${w.lng})`}</dd>
+            <dt>Location</dt><dd>{[w.address_text, w.town, w.lga_name, w.state_name].filter(Boolean).join(', ')}{w.lat && ` (${w.lat}, ${w.lng})`}</dd>
             <dt>Capacity</dt><dd>{w.capacity_kg ? `${Number(w.capacity_kg) / 1000} t` : '—'}</dd><dt>Commodities</dt><dd>{w.commodities.join(', ') || '—'}</dd>
           </dl>
         )}
@@ -573,6 +629,61 @@ export function WarehousePage({ c, w, policies, issues }: { c: Ctx; w: Warehouse
         <p className="muted small">A second Kitovu person verifies each policy against the insurer’s schedule before it counts.</p>
       </section>
       {kitovu(c) && issues.length > 0 && <section className="card"><h2>Data issues</h2><IssueTable c={c} rows={issues} /></section>}
+    </Page>
+  );
+}
+
+export function CommoditiesPage({ c, rows }: { c: Ctx; rows: Commodity[] }) {
+  const cats = CATEGORIES.map((k) => [k, k.replace('_', ' ')] as [string, string]);
+  const months = [1, 2, 3, 4, 5, 6].map((m) => [String(m), `${m} month${m === 1 ? '' : 's'}`] as [string, string]);
+  return (
+    <Page c={c} title="Commodities">
+      <h1>Commodities</h1>
+      <p className="muted">The crops StorageX handles. Each has a moisture limit checked at the gate and a longest storage term (1 to 6 months) for its receipts. A crop that is switched off stays on its old records but cannot be chosen for new farmers, deliveries or prices.</p>
+      <details className="card">
+        <summary><b>Add a commodity</b></summary>
+        <form method="post" action="/commodities" className="grid">
+          <Csrf c={c} />
+          <Field label="Code" name="code" required hint="Three letters, e.g. GNT" />
+          <Field label="Name" name="name" required hint="e.g. Groundnut (shelled)" />
+          <Select label="Category" name="category" blank="Choose…" options={cats} />
+          <Select label="Unit" name="unit" value="kg" options={[['kg', 'Kilograms'], ['l', 'Litres']]} />
+          <Field label="Maximum moisture at intake (%)" name="max_moisture_pct" inputMode="decimal" hint="Blank = not checked" />
+          <Select label="Longest storage term" name="max_storage_months" value="6" options={months} />
+          <label className="check"><input type="checkbox" name="storable" value="1" defaultChecked /> Can back receipts</label>
+          <button className="primary">Add commodity</button>
+        </form>
+      </details>
+      <section className="card">
+        <table>
+          <thead><tr><th>Code</th><th>Commodity</th><th>Moisture limit</th><th>Longest term</th><th>In use</th><th></th></tr></thead>
+          <tbody>{rows.map((k) => (
+            <tr key={k.code} className={k.active ? '' : 'muted'}>
+              <td className="mono">{k.code}</td>
+              <td>{k.name}<br /><small className="muted">{`${k.category.replace('_', ' ')} · ${k.unit}${k.storable ? '' : ' · cannot back receipts'}${k.active ? '' : ' · switched off'}`}</small></td>
+              <td>{k.max_moisture_pct ? `${Number(k.max_moisture_pct)}%` : '—'}</td>
+              <td>{`${k.max_storage_months} mo`}</td>
+              <td><small>{`${k.farmers} farmers · ${k.receipts} receipts`}</small></td>
+              <td>
+                <details>
+                  <summary>Edit</summary>
+                  <form method="post" action={`/commodities/${k.code}`} className="grid">
+                    <Csrf c={c} />
+                    <Field label="Name" name="name" value={k.name} required />
+                    <Select label="Category" name="category" value={k.category} options={cats} />
+                    <Select label="Unit" name="unit" value={k.unit} options={[['kg', 'Kilograms'], ['l', 'Litres']]} />
+                    <Field label="Maximum moisture (%)" name="max_moisture_pct" value={k.max_moisture_pct ? Number(k.max_moisture_pct) : ''} inputMode="decimal" />
+                    <Select label="Longest storage term" name="max_storage_months" value={String(k.max_storage_months)} options={months} />
+                    <label className="check"><input type="checkbox" name="storable" value="1" defaultChecked={k.storable} /> Can back receipts</label>
+                    <label className="check"><input type="checkbox" name="active" value="1" defaultChecked={k.active} /> In use (offered in forms)</label>
+                    <button>Save</button>
+                  </form>
+                </details>
+              </td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </section>
     </Page>
   );
 }

@@ -3,6 +3,7 @@
 // held against them: a check page must never report stock that does not exist.
 import { config } from './config';
 import type { ReceiptDoc } from './receipt-doc';
+import { termOf } from './receipt-doc';
 
 const base = () => config.baseUrl.replace(/\/$/, '');
 
@@ -10,7 +11,7 @@ interface Showcase extends Omit<ReceiptDoc, 'url'> { events: { label: string; at
 
 const LIST: Showcase[] = [
   {
-    receipt_no: 'SX-OY-ISY-261104-0018', status: 'pledged', status_label: 'Valid — pledged to a lender',
+    receipt_no: 'SX-OY-ISY-261104-0018', term: { months: 6, until: '2027-05-04' }, status: 'pledged', status_label: 'Valid — pledged to a lender',
     commodity: 'Maize (white)', grade: 'A', net_kg: 2450, bags: 49, moisture: 12.8,
     warehouse: 'Iseyin Grain Store', wh_code: 'ISY', wh_state: 'Oyo', wh_tier: 'A', insured: true,
     depositor: 'Funmilayo Adeyemi', depositor_code: 'SXF-104233', issued_at: '2026-11-04T09:42:00Z', intake_ref: 'IN-ISY-261104-031',
@@ -22,7 +23,7 @@ const LIST: Showcase[] = [
     today_per_kg: 61000,
   },
   {
-    receipt_no: 'SX-NA-AWE-261029-0004', status: 'issued', status_label: 'Valid',
+    receipt_no: 'SX-NA-AWE-261029-0004', term: { months: 4, until: '2027-02-28' }, status: 'issued', status_label: 'Valid',
     commodity: 'Soybean', grade: 'A', net_kg: 3000, bags: 60, moisture: 10.9,
     warehouse: 'Awe Produce Store', wh_code: 'AWE', wh_state: 'Nasarawa', wh_tier: 'B', insured: true,
     depositor: 'Musa Danjuma', depositor_code: 'SXF-208117', issued_at: '2026-10-29T11:05:00Z', intake_ref: 'IN-AWE-261029-012',
@@ -34,7 +35,7 @@ const LIST: Showcase[] = [
     today_per_kg: 73500,
   },
   {
-    receipt_no: 'SX-NI-MNA-261112-0011', status: 'financed', status_label: 'Valid — financed',
+    receipt_no: 'SX-NI-MNA-261112-0011', term: { months: 6, until: '2027-05-12' }, status: 'financed', status_label: 'Valid — financed',
     commodity: 'Paddy rice', grade: 'B', net_kg: 4975.5, bags: 100, moisture: 13.6,
     warehouse: 'Minna Central Warehouse', wh_code: 'MNA', wh_state: 'Niger', wh_tier: 'A', insured: true,
     depositor: 'Hauwa Abdullahi', depositor_code: 'SXF-301452', issued_at: '2026-11-12T14:20:00Z', intake_ref: 'IN-MNA-261112-044',
@@ -68,5 +69,6 @@ export function showcasePassport(no: string) {
     value_at_storage: r.value ? { kobo: r.value.kobo, per_kg: r.value.kobo_per_kg } : null,
     value_today: { kobo: Math.round(r.net_kg * r.today_per_kg), per_kg: r.today_per_kg, on: new Date() },
     insurance: r.insurance ? `${r.insurance.insurer}, policy ${r.insurance.policy_no}` : null,
+    term: r.term ? termOf({ ...r.term, storage_months: r.term.months, storage_until: r.term.until, status: r.status }) : null,
   };
 }

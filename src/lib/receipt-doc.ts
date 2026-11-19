@@ -18,6 +18,8 @@ export interface ReceiptDoc {
   insurance?: { insurer: string; policy_no?: string | null; cover_to?: Date | string | null } | null;
   /** A company other than Kitovu that issued the receipt on StorageX. */
   issuer?: string | null;
+  /** Storage term agreed at issue, and the date it runs to now (later if extended). */
+  term?: { months: number; until: string } | null;
 }
 
 export const COMPANY = 'Kitovu Technology Company Limited, RC 1348965, Kitovu Business Hub, Iseyin-Saki Expressway, Iseyin, Oyo State';
@@ -29,6 +31,7 @@ export const TERMS = [
   'Weight is net of bag tare. Grade and moisture are as tested and recorded at intake.',
   'A receipt can back one loan at a time. While it is pledged, the produce leaves the warehouse only through a sale the lender approves, or after the loan is repaid. Sale proceeds pay storage and handling fees first, then the lender, then the depositor.',
   'Storage and handling fees accrue at the published rates and are settled from a sale or before release.',
+  'The produce is stored for the term shown. Before it ends the depositor sells, collects or extends it; a loan against this receipt must fall due before the term ends.',
   'Altering this paper does not change the record. A paper that does not match its live record is not a valid receipt.',
 ];
 
@@ -52,6 +55,7 @@ export function insuranceText(d: ReceiptDoc) {
   if (d.insurance) return `${d.insurance.insurer}${d.insurance.policy_no ? `, policy ${d.insurance.policy_no}` : ''}${d.insurance.cover_to ? `, cover to ${dayText(d.insurance.cover_to)}` : ''}`;
   return d.insured ? 'Current policy on record' : 'No current policy on record';
 }
+export const termText = (t: { months: number; until: string }) => `${t.months} month${t.months === 1 ? '' : 's'} from issue, to ${dayText(t.until + 'T12:00:00Z')}`;
 export const whenText = (d: Date | string) => new Date(d).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WAT';
 
 /** Label and value pairs in reading order, shared by the PDF and the web view. */
@@ -65,6 +69,7 @@ export function facts(d: ReceiptDoc): [string, string][] {
     ['Insurance', insuranceText(d)],
     ['Bags', d.bags ? `${d.bags} bags` : '—'],
     ['Issued', whenText(d.issued_at)],
+    ...(d.term ? [['Storage term', termText(d.term)]] as [string, string][] : []),
     ['Moisture at intake', d.moisture != null ? `${d.moisture}%` : '—'],
     ['From delivery', `${d.intake_ref ?? '—'}${d.lot ? `, ${d.lot}` : ''}`],
     ...(d.issuer ? [['Issuer', d.issuer], ['Registry', 'StorageX, kept by Kitovu']] as [string, string][] : []),
@@ -141,4 +146,18 @@ export function receiptPdfBuffer(d: ReceiptDoc) {
   p.text(L, 813, d.url.length > 110 ? d.url.slice(0, 110) + '…' : d.url, { size: 6.5, gray: 0.45 });
   p.text(L, 824, COMPANY, { size: 6.5, gray: 0.45 });
   return p.toBuffer({ title: `Warehouse receipt ${d.receipt_no}` });
+}
+
+// ---------- storage term ----------
+const CLOSED = ['closed', 'settled', 'cancelled', 'expired'];
+export const ymdText = (ymd: string) => new Date(ymd + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+export const lagosDay = (d = new Date()) => d.toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' });
+/** How long the receipt may still be stored. A receipt past its term is still a valid record of the stock, but it
+ *  should be sold, collected or extended; it cannot back a new loan. */
+export function termOf(r: { storage_months: number; storage_until: string; status: string }, today = lagosDay(), warnDays = 14) {
+  const days = Math.round((Date.parse(r.storage_until + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 86_400_000);
+  const state: 'in_term' | 'ending' | 'past' | 'done' = CLOSED.includes(r.status) ? 'done' : days < 0 ? 'past' : days <= warnDays ? 'ending' : 'in_term';
+  const label = state === 'done' ? `Ran to ${ymdText(r.storage_until)}` : state === 'past' ? `Term ended ${ymdText(r.storage_until)}, ${-days} day${days === -1 ? '' : 's'} ago`
+    : `${days} day${days === 1 ? '' : 's'} left, to ${ymdText(r.storage_until)}`;
+  return { months: r.storage_months, until: r.storage_until, days, state, label };
 }

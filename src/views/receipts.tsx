@@ -2,7 +2,7 @@ import type { Ctx } from '../lib/http';
 import type { ReceiptDoc } from '../lib/receipt-doc';
 import { ReceiptDocument } from './receipt-doc';
 import type { Receipt } from '../lib/receipts';
-import { EVENT_LABEL } from '../lib/receipts';
+import { EVENT_LABEL, termOf } from '../lib/receipts';
 import { can } from '../lib/rbac';
 import { qrSvg } from '../lib/qr';
 import { Page, Csrf, fmtDate, fmtDay, Pager } from './layout';
@@ -13,6 +13,11 @@ import { ValueHistory } from './history';
 const changeText = (now: number, then: number) => { const d = ((now - then) / then) * 100; return `${d >= 0 ? 'up' : 'down'} ${Math.abs(d).toFixed(1)}%`; };
 
 const kg = (n: number | string) => `${Number(n).toLocaleString('en-NG', { maximumFractionDigits: 2 })} kg`;
+const TERM_TONE = { in_term: 'ok', ending: 'warn', past: 'bad', done: '' } as const;
+/** Storage term and how much of it is left: what tells a lender or buyer the receipt is still good to rely on. */
+export function TermBadge({ t }: { t: ReturnType<typeof termOf> }) {
+  return <span className={`badge ${TERM_TONE[t.state]}`}>{t.state === 'in_term' ? `${t.days} days left` : t.state === 'ending' ? `Ends in ${t.days} days` : t.state === 'past' ? 'Term ended' : 'Closed'}</span>;
+}
 const TONE: Record<string, string> = { issued: 'ok', pledged: 'warn', financed: 'warn', sale_approved: 'warn', partially_released: 'warn', under_exception: 'warn' };
 
 export function ReceiptsPage({ c, rows, q }: { c: Ctx; rows: Receipt[]; q: Record<string, string> }) {
@@ -29,12 +34,13 @@ export function ReceiptsPage({ c, rows, q }: { c: Ctx; rows: Receipt[]; q: Recor
       </form>
       <section className="card">
         <table>
-          <thead><tr><th>Receipt</th><th>Owner</th><th>Crop</th><th>Net</th><th>Warehouse</th><th>Issued</th><th>Status</th></tr></thead>
+          <thead><tr><th>Receipt</th><th>Owner</th><th>Crop</th><th>Net</th><th>Warehouse</th><th>Issued</th><th>Storage term</th><th>Status</th></tr></thead>
           <tbody>{rows.map((r) => (
             <tr key={r.id}>
               <td><a className="mono" href={`/receipts/${r.receipt_no}`}>{r.receipt_no}</a>{r.lots && r.lots > 1 ? <small className="muted">{` · ${r.lot_no}/${r.lots}`}</small> : null}</td>
               <td>{r.farmer_name ?? '—'}<br /><small className="muted">{r.farmer_code}</small></td>
               <td>{r.commodity}{r.grade ? ` · ${r.grade}` : ''}</td><td>{kg(r.net_weight_kg)}</td><td>{r.wh_name}</td><td>{fmtDay(r.issued_at)}</td>
+              <td>{(() => { const t = termOf(r); return <>{`${t.months} mo`} <TermBadge t={t} /></>; })()}</td>
               <td><span className={`badge ${TONE[r.status] ?? ''}`}>{r.status}</span>{r.source !== 'app' && <> <span className="badge">old system</span></>}</td>
             </tr>
           ))}</tbody>
@@ -63,6 +69,7 @@ export function ReceiptPage({ c, r, events, chainOk, url, bal, rels, value, hist
             <dt>Issued</dt><dd>{`${fmtDate(r.issued_at)}${r.issued_by_name ? ` by ${r.issued_by_name}` : ''}`}</dd>
             {r.issuer_name && <><dt>Issuer</dt><dd>{r.issuer_name}</dd></>}
             <dt>Value at storage</dt><dd>{r.issue_value_kobo != null ? <><b>{fmtNGN(r.issue_value_kobo, { decimals: false })}</b>{` at ${fmtNGN(r.issue_kobo_per_kg!)}/kg`}</> : 'Not valued at issue'}</dd>
+            {(() => { const t = termOf(r); return <><dt>Storage term</dt><dd>{`${t.months} month${t.months === 1 ? '' : 's'} · ${t.label}`} <TermBadge t={t} /></dd></>; })()}
             <dt>Insurance at issue</dt><dd>{r.insurer_name ? `${r.insurer_name}${r.policy_number ? `, policy ${r.policy_number}` : ''}${r.cover_to ? `, cover to ${fmtDay(r.cover_to)}` : ''}` : 'No active policy on record when issued'}</dd>
             <dt>Delivery</dt><dd>{r.intake_ref && can(c.membership, 'stock.manage') ? <a href={`/intakes/${r.intake_ref}`}>{r.intake_ref}</a> : r.intake_ref ?? 'old system'}{r.lots && r.lots > 1 ? ` · receipt ${r.lot_no} of ${r.lots}` : ''}</dd>
             {r.closed_at && <><dt>Closed</dt><dd>{`${fmtDate(r.closed_at)}${r.closed_reason && kitovu ? ` — ${r.closed_reason}` : ''}`}</dd></>}
@@ -109,6 +116,18 @@ export function ReceiptPage({ c, r, events, chainOk, url, bal, rels, value, hist
           <p className="muted small">Kitovu orders a release; someone else at the warehouse weighs it out and photographs the scale and the signed slip. The receipt is reduced or closed when loading is confirmed.</p>
         </section>
       ) : null}
+      {(kitovu || (c.membership?.org_kind === 'issuer' && c.membership.org_id === r.issuer_org_id)) && can(c.membership, 'receipts.issue') && !['closed', 'settled', 'cancelled', 'expired'].includes(r.status) && (
+        <section className="card">
+          <h2>Extend the storage term</h2>
+          <p className="muted">{`The term runs to ${termOf(r).label.replace(/^.*to /, '')}. Extend it when the stock has been checked and the depositor wants to keep storing. The farmer is told by text, and the extension is recorded on the receipt’s history.`}</p>
+          <form method="post" action={`/receipts/${r.receipt_no}/extend`} className="row">
+            <Csrf c={c} />
+            <select name="months" defaultValue="1" aria-label="Extend by">{[1, 2, 3, 4, 5, 6].map((m) => <option key={m} value={m}>{`By ${m} month${m === 1 ? '' : 's'}`}</option>)}</select>
+            <input name="note" placeholder="Why (e.g. stock inspected, in good condition)" aria-label="Why" required />
+            <button>Extend term</button>
+          </form>
+        </section>
+      )}
       {kitovu && can(c.membership, 'receipts.issue') && r.status === 'issued' && (
         <section className="card">
           <h2>Cancel this receipt</h2>
@@ -143,6 +162,7 @@ export function PassportPage({ c, p, notice, doc }: { c: Ctx; p: any; notice?: s
           <dt>Insurance</dt><dd>{p.insurance ?? (p.insured ? 'Current policy on record' : 'No current policy on record')}</dd>
           <dt>Value at storage</dt><dd>{p.value_at_storage ? <><b>{fmtNGN(p.value_at_storage.kobo, { decimals: false })}</b>{` at ${fmtNGN(p.value_at_storage.per_kg)}/kg on the day of issue`}</> : 'Not valued at issue'}</dd>
           {p.value_today && <><dt>Value today</dt><dd><b>{fmtNGN(p.value_today.kobo, { decimals: false })}</b>{` at ${fmtNGN(p.value_today.per_kg)}/kg${p.value_at_storage ? ` (${changeText(p.value_today.kobo, p.value_at_storage.kobo)} since storage)` : ''}, valued ${fmtDay(p.value_today.on)}`}</dd></>}
+          {p.term && <><dt>Storage term</dt><dd>{`${p.term.months} month${p.term.months === 1 ? '' : 's'} · ${p.term.label}`} <TermBadge t={p.term} /></dd></>}
           <dt>Owner</dt><dd>{p.owner}</dd>
           {p.lot && <><dt>Part</dt><dd>{`Receipt ${p.lot} from one delivery`}</dd></>}
           <dt>Issued</dt><dd>{fmtDate(p.issued_at)}</dd>

@@ -17,6 +17,7 @@ import { getSettings } from './settings';
 import { clean, csvCell } from './util';
 import { policyFor, referencePrice, compute } from './valuation';
 import { receiptBalance } from './stock';
+import { ymdText } from './receipt-doc';
 
 const isKitovu = (a: Actor) => a.membership?.org_kind === 'kitovu';
 const lendingOrg = (a: Actor) => ['lender', 'kitovu'].includes(a.membership?.org_kind ?? '');
@@ -100,11 +101,14 @@ export async function capacity(lenderOrgId: string, receiptIds: string[]) {
 async function eligibleReceipts(b: any, farmerId: string, receiptNos: string[], exceptLine?: string) {
   const ids: string[] = [];
   for (const no of receiptNos) {
-    const r = await db.get<{ id: string; status: string; owner_farmer_id: string; commodity_code: string; receipt_no: string }>(
-      'SELECT id, status::text, owner_farmer_id, commodity_code, receipt_no FROM receipts WHERE receipt_no=upper($1)', clean(no, 40));
+    const r = await db.get<{ id: string; status: string; owner_farmer_id: string; commodity_code: string; receipt_no: string; storage_until: string; due: string }>(
+      `SELECT id, status::text, owner_farmer_id, commodity_code, receipt_no, to_char(storage_until,'YYYY-MM-DD') AS storage_until,
+              to_char((now() AT TIME ZONE 'Africa/Lagos')::date + $2::int, 'YYYY-MM-DD') AS due FROM receipts WHERE receipt_no=upper($1)`, clean(no, 40), Number(b.tenor_days) || 0);
     if (!r) throw new UserError(`Receipt ${no} not found.`);
     if (r.owner_farmer_id !== farmerId) throw new UserError(`Receipt ${r.receipt_no} is not owned by this farmer.`);
     if (!FREE.includes(r.status)) throw new UserError(`Receipt ${r.receipt_no} is ${r.status.replace(/_/g, ' ')} and cannot be pledged.`);
+    // A loan must fall due while the produce is still within its storage term.
+    if (r.due > r.storage_until) throw new UserError(`Receipt ${r.receipt_no}'s storage term ends on ${ymdText(r.storage_until)}, before this ${b.tenor_days}-day loan would fall due (${ymdText(r.due)}). Extend the term or use a shorter product.`);
     if (b.commodity_codes.length && !b.commodity_codes.includes(r.commodity_code)) throw new UserError(`This product does not lend against ${r.commodity_code}.`);
     if (await db.val('SELECT 1 FROM liens WHERE receipt_id=$1 AND released_at IS NULL', r.id)) throw new UserError(`Receipt ${r.receipt_no} is already pledged.`);
     if (b.prepared_by_org_id && (await db.val<string>('SELECT issuer_org_id FROM receipts WHERE id=$1', r.id)) !== b.prepared_by_org_id) throw new UserError(`Receipt ${r.receipt_no} was not issued by your company.`);

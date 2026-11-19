@@ -92,6 +92,13 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats, links }: { c: C
           {box('alerts.sms')}
         </section>
         <section className="card">
+          <h2>Receipt storage terms</h2>
+          <p className="muted">Every receipt carries a storage term of 1 to 6 months, chosen when it is issued. Each crop has its own limit (set under <a href="/commodities">Commodities</a>). Loans must be due before the term ends; the term can be extended.</p>
+          {(['receipts.default_storage_months', 'receipts.term_warn_days'] as const).map((k) => (
+            <label className="field" key={k}><span>{LABELS[k]}</span><input name={k} type="number" step="1" defaultValue={String(s[k])} /></label>
+          ))}
+        </section>
+        <section className="card">
           <h2>WareGuard limits</h2>
           <p className="muted">Used once WareGuard readings arrive through Titan. Above these limits the warehouse team, Kitovu and every lender with stock there are alerted, with advice on what to do.</p>
           {(['wareguard.max_temp_c', 'wareguard.max_rh_pct', 'wareguard.door_open_minutes', 'wareguard.offline_minutes'] as const).map((k) => (
