@@ -1584,6 +1584,21 @@ async function main() {
     eq((await Rc.receiptByNo(admin, issNo))!.status, 'financed', 'its receipts stay valid');
     hookSrv.close();
   });
+  await t('Build 13: Kitovu registers and retires devices; the connections panel shows Titan live', async () => {
+    const WG = await import('../src/lib/wareguard');
+    await rejects(WG.registerDevice(officer, 'WH-NI-MNA-02', 'WG-HAND-1', 'Bay 7'));
+    await WG.registerDevice(ops, 'WH-NI-MNA-02', 'WG-HAND-1', 'Bay 7');
+    const d = (await WG.devicesAt(wh.id)).find((x) => x.device_ref === 'WG-HAND-1')!;
+    ok(d && d.active);
+    await WG.retireDevice(ops, d.id);
+    eq((await WG.devicesAt(wh.id)).find((x) => x.device_ref === 'WG-HAND-1')!.active, false);
+    await signInAs(admin);
+    const st = await req('GET', '/admin/settings');
+    ok(/devices reporting; last reading/.test(st.text), 'Titan shown as connected');
+    const sw = await req('GET', '/stock-watch/WH-NI-MNA-02');
+    ok(sw.text.includes('WareGuard devices') && sw.text.includes('WG-API-1'));
+    delete jar.sx_sid;
+  });
   await t('lender watch pages: alerts, stock watch, value over time, buyer offers; the dashboard is Kitovu-only', async () => {
     await signInAs(officer);
     const tw = await req('GET', '/tower'); ok(tw.text.includes('Your book: stock value and what is owed') && tw.text.includes('<svg'), 'book chart on the tower');

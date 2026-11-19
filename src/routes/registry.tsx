@@ -21,6 +21,12 @@ import * as N from '../lib/notify';
 import * as U from '../lib/ussd';
 import * as DS from '../lib/agents/data-steward';
 import { integrations } from '../lib/integrations';
+const liveStatus = async () => {
+  const s = await S.getSettings();
+  const w = (await db.get<any>(`SELECT count(*)::int AS devices, count(*) FILTER (WHERE last_seen_at > now() - make_interval(mins => $1::int))::int AS reporting, max(last_seen_at) AS last_at FROM sensor_devices WHERE active`, s['wareguard.offline_minutes']))!;
+  const titan = !!(await db.val(`SELECT 1 FROM api_clients k JOIN organisations o ON o.id=k.org_id WHERE o.kind='kitovu' AND k.status='active' AND 'wareguard:write' = ANY(k.scopes)`));
+  return { wareguard: { ...w, titan_key: titan } };
+};
 import { config } from '../lib/config';
 import { SettingsPage } from '../views/settings';
 
@@ -166,7 +172,7 @@ post('/admin/applications/:id/reject', 'perm:orgs.manage', (c) => act(c, '/admin
 get('/admin/settings', 'perm:settings.manage', async (c) => {
   const stats = await db.get(`SELECT count(*) FILTER (WHERE reviewer_agreed_with_ai) AS agreed, count(*) FILTER (WHERE reviewer_agreed_with_ai = false) AS disagreed,
     count(*) FILTER (WHERE ai_flag IS NOT NULL AND status IN ('approved','rejected')) AS screened FROM kyc_submissions`);
-  c.html(render(<SettingsPage c={c} s={await S.getSettings()} serverAiOff={config.kycAiMode === 'off'} hasKey={!!config.anthropicKey} stats={stats} links={integrations(await S.getSettings())} />));
+  c.html(render(<SettingsPage c={c} s={await S.getSettings()} serverAiOff={config.kycAiMode === 'off'} hasKey={!!config.anthropicKey} stats={stats} links={integrations(await S.getSettings(), await liveStatus())} />));
 });
 post('/admin/settings', 'perm:settings.manage', (c) => act(c, '/admin/settings', async () => {
   const input: Record<string, unknown> = {};

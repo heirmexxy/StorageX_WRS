@@ -9,6 +9,9 @@ import { getSettings } from './settings';
 import { raise } from './alerts';
 import { explain, type SensorKind, type Advice } from './agents/wareguard-explainer';
 import { LIVE } from './stock';
+import { can } from './rbac';
+import { UserError } from './errors';
+import { actorOf, type Actor } from './auth';
 
 export interface Reading { at: string | Date; temp_c?: number | null; rh_pct?: number | null; door_open?: boolean | null; battery_pct?: number | null }
 
@@ -125,4 +128,24 @@ export async function health(whIds: string[], hours = 48) {
       state: !devices.length ? 'none' : alerts.some((a) => a.severity === 'urgent') ? 'bad' : alerts.length || online < devices.length ? 'warn' : 'ok', limits: { temp: s['wareguard.max_temp_c'], rh: s['wareguard.max_rh_pct'] } });
   }
   return out;
+}
+
+/** Devices at a warehouse with their latest reading (for the device register). */
+export const devicesAt = (whId: string) => db.all<any>(`SELECT d.*, r.at AS last_at, r.temp_c::float AS temp_c, r.rh_pct::float AS rh_pct, r.door_open, r.battery_pct::float AS battery_pct
+  FROM sensor_devices d LEFT JOIN LATERAL (SELECT * FROM sensor_readings x WHERE x.device_id=d.id ORDER BY at DESC LIMIT 1) r ON true WHERE d.warehouse_id=$1 ORDER BY d.active DESC, d.label`, whId);
+
+/** Kitovu adds a device by hand (a trial, or before Titan sends its list), or retires one. */
+export async function registerDevice(a: Actor, whCode: string, ref: string, label: string) {
+  if (a.membership?.org_kind !== 'kitovu' || !can(a.membership, 'stock.manage')) throw new UserError('Only Kitovu operations register WareGuard devices.');
+  if (!/^[\w.:-]{3,80}$/.test(ref)) throw new UserError('Device id: the id printed on the WareGuard unit (3 to 80 letters, digits, dots, dashes).');
+  const w = await db.get<{ id: string }>('SELECT id FROM warehouses WHERE code=upper($1)', whCode);
+  if (!w) throw new UserError('Warehouse not found.');
+  const id = await upsertDevice(w.id, ref, label.trim() || ref);
+  await audit(actorOf(a), 'wareguard.device_registered', { entity: 'sensor_device', entityId: id, data: { ref, warehouse: whCode } });
+}
+export async function retireDevice(a: Actor, id: string) {
+  if (a.membership?.org_kind !== 'kitovu') throw new UserError('Only Kitovu operations retire devices.');
+  await db.run('UPDATE sensor_devices SET active=false WHERE id=$1', id);
+  await db.run('UPDATE sensor_alerts SET ended_at=now() WHERE device_id=$1 AND ended_at IS NULL', id);
+  await audit(actorOf(a), 'wareguard.device_retired', { entity: 'sensor_device', entityId: id });
 }

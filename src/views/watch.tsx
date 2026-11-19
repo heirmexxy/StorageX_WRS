@@ -70,7 +70,7 @@ export function WatchListPage({ c, rows, connected }: { c: Ctx; rows: any[]; con
   );
 }
 
-export function WatchSitePage({ c, s }: { c: Ctx; s: any }) {
+export function WatchSitePage({ c, s, devices }: { c: Ctx; s: any; devices?: any[] }) {
   const { w, stock, wg, flags } = s;
   const lender = c.membership?.org_kind === 'lender';
   const totNow = stock.reduce((n: number, r: any) => n + (r.value_now ?? 0), 0), totBase = stock.reduce((n: number, r: any) => n + (r.value_storage ?? 0), 0);
@@ -103,6 +103,25 @@ export function WatchSitePage({ c, s }: { c: Ctx; s: any }) {
               { name: `Limit ${wg.limits.rh}%`, tone: 'base', points: [{ x: hourKey(series[0].h), y: wg.limits.rh }, { x: hourKey(series.at(-1).h), y: wg.limits.rh }] }]} />
         </>}
       </section>
+      {devices && (
+        <section className="card">
+          <h2>WareGuard devices</h2>
+          {devices.length ? (
+            <table><thead><tr><th>Device</th><th>Last reading</th><th>Temperature</th><th>Humidity</th><th>Door</th><th>Battery</th><th></th></tr></thead>
+              <tbody>{devices.map((d) => (
+                <tr key={d.id} className={d.active ? '' : 'muted'}><td>{d.label}<br /><small className="mono muted">{d.device_ref}</small></td>
+                  <td>{d.last_at ? ago(d.last_at) : 'never'}</td><td>{d.temp_c != null ? `${d.temp_c.toFixed(1)}°C` : '—'}</td><td>{d.rh_pct != null ? `${d.rh_pct.toFixed(0)}%` : '—'}</td>
+                  <td>{d.door_open == null ? '—' : d.door_open ? 'Open' : 'Closed'}</td><td>{d.battery_pct != null ? `${d.battery_pct.toFixed(0)}%` : '—'}</td>
+                  <td>{d.active ? <form method="post" action={`/stock-watch/${w.code}/devices/${d.id}/retire`}><Csrf c={c} /><button className="link">Retire</button></form> : 'Retired'}</td></tr>
+              ))}</tbody></table>
+          ) : <p className="muted">No devices yet. Titan adds them automatically; you can also add one by its id.</p>}
+          <form method="post" action={`/stock-watch/${w.code}/devices`} className="inline-form"><Csrf c={c} />
+            <label className="field"><span>Device id (on the unit)</span><input name="ref" required /></label>
+            <label className="field"><span>Where it is</span><input name="label" placeholder="Bay 2, north wall" /></label>
+            <button>Add device</button>
+          </form>
+        </section>
+      )}
       <section className="card">
         <h2>{lender ? 'Your stock here' : 'Stock here'}</h2>
         <div className="kpis">

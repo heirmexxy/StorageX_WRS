@@ -16,7 +16,9 @@ function newestBackup() {
 }
 function offsiteAt() { try { return fs.statSync(path.join(config.backupDir, '.offsite-ok')).mtimeMs; } catch { return null; } }
 
-export function integrations(s: Settings): Integration[] {
+export interface Live { wareguard: { devices: number; reporting: number; last_at: Date | null; titan_key: boolean } }
+
+export function integrations(s: Settings, live?: Live): Integration[] {
   const local = /localhost|127\.0\.0\.1|example|placeholder/.test(config.baseUrl);
   const b = newestBackup(), o = offsiteAt();
   return [
@@ -31,8 +33,11 @@ export function integrations(s: Settings): Integration[] {
     { name: 'USSD (Africa’s Talking)', state: config.ussdKey && s['ussd.enabled'] && s['ussd.code'] ? 'ok' : 'off',
       status: !config.ussdKey ? 'Not connected' : !s['ussd.enabled'] ? 'Connected; switched off below' : s['ussd.code'] ? `Live on ${s['ussd.code']}` : 'Connected; code not entered yet',
       affects: 'Farmers checking produce, loans, sales and prices by USSD.' },
-    { name: 'WareGuard readings (Titan)', state: 'off', status: 'Not connected yet (Build 13)',
-      affects: 'Warehouse conditions on Stock watch and the dashboard, and WareGuard alerts. Everything else works without it.' },
+    (() => { const w = live?.wareguard; const fresh = !!w?.last_at && Date.now() - new Date(w.last_at).getTime() < 3 * 3_600_000; return {
+      name: 'WareGuard readings (Titan)', state: fresh ? (w!.reporting < w!.devices ? 'warn' : 'ok') : w?.titan_key ? 'warn' : 'off',
+      status: !w?.titan_key ? 'Not connected: no Titan key yet' : !w.devices ? 'Titan key made; no devices sent yet' : `${w.reporting} of ${w.devices} devices reporting; last reading ${w.last_at ? age(new Date(w.last_at).getTime()) : 'never'}`,
+      affects: 'Warehouse conditions on Stock watch and the dashboard, WareGuard alerts, and the WareGuard rule for receipt issuers.',
+      todo: !w?.titan_key ? 'Create an API key with the wareguard:write permission (API keys, signed in as a Kitovu administrator) and give it to the Titan team with docs/titan.md.' : undefined } as Integration; })(),
     { name: 'Inbound SMS', state: 'off', status: 'Not connected',
       affects: 'Farmers texting BAL, KUDI, OWO or EGO for their balance. The same answer already works on USSD (option 6).' },
     { name: 'Identity provider', state: config.kycProvider === 'none' ? 'off' : 'ok', status: config.kycProvider === 'none' ? 'None: compliance reviews ID photos by hand' : config.kycProvider,
