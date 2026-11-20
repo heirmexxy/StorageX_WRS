@@ -55,6 +55,28 @@ export function readFile(f: FileRow) {
 }
 
 /** Retention: remove the contents of files whose delete_after date has passed. Rows, hashes and decisions remain. */
+/** Set deletion dates from the retention settings: delivery photos a number of years after their receipts close (all
+ *  of them), or a number of months after a delivery that never became a receipt. Re-run nightly so a changed setting
+ *  applies to everything not yet deleted. Then trims the USSD log. */
+export async function applyRetention() {
+  const { getSettings } = await import('./settings');
+  const s = await getSettings();
+  const years = s['retention.delivery_photo_years'], months = s['retention.unissued_delivery_months'];
+  const dated = await db.val<number>(`WITH due AS (
+      SELECT i.id,
+        CASE WHEN count(r.id) > 0 AND bool_and(r.status::text IN ('closed','settled','cancelled','expired'))
+               THEN (max(r.closed_at) AT TIME ZONE 'Africa/Lagos')::date + make_interval(years => $1)
+             WHEN count(r.id) = 0 AND (i.status = 'rejected' OR i.received_at < now() - make_interval(months => $2))
+               THEN (i.received_at AT TIME ZONE 'Africa/Lagos')::date + make_interval(months => $2)
+        END AS until
+      FROM intakes i LEFT JOIN receipts r ON r.intake_id = i.id GROUP BY i.id)
+    , upd AS (UPDATE files f SET delete_after = due.until::date FROM due
+      WHERE f.kind='intake_evidence' AND f.entity='intake' AND f.entity_id=due.id AND f.deleted_at IS NULL AND f.delete_after IS DISTINCT FROM due.until::date
+      RETURNING 1) SELECT count(*)::int FROM upd`, years, months);
+  const ussd = await db.val<number>(`WITH d AS (DELETE FROM ussd_log WHERE created_at < now() - make_interval(months => $1) RETURNING 1) SELECT count(*)::int FROM d`, s['retention.ussd_log_months']);
+  return { dated: dated ?? 0, ussd: ussd ?? 0 };
+}
+
 export async function purgeExpiredFiles() {
   const due = await db.all<FileRow>(`SELECT * FROM files WHERE deleted_at IS NULL AND delete_after IS NOT NULL AND delete_after <= current_date`);
   for (const f of due) {

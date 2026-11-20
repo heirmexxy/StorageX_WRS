@@ -9,6 +9,7 @@ import { act } from './admin';
 import { can } from '../lib/rbac';
 import { db } from '../lib/db';
 import { issuable, blockers } from '../lib/receipts';
+import * as FL from '../lib/field';
 import { getSettings } from '../lib/settings';
 
 /** JSON endpoints for the gate app: user mistakes come back as {error}, never as an HTML page. */
@@ -21,7 +22,16 @@ async function api(c: Ctx, fn: () => Promise<unknown>) {
   }
 }
 
-get('/api/intake/bootstrap', 'perm:stock.manage', (c) => api(c, async () => ({ ...(await I.bootstrap(c.actor)), csrf: c.csrf })));
+// The field app: deliveries for warehouse staff, offline registration for field staff and partners; each sees what
+// their role allows.
+get('/api/intake/bootstrap', 'auth', (c) => api(c, async () => {
+  const deliver = can(c.membership, 'stock.manage'), register = await FL.registerBoot(c.actor);
+  if (!deliver && !register) throw new HttpError(403, 'Your role does not use the field app.');
+  const base = deliver ? await I.bootstrap(c.actor)
+    : { user: { id: c.actor.user.id, name: c.actor.user.full_name, org: c.membership!.org_name }, warehouses: [], farmers: [], commodities: [], codes: {}, serverTime: new Date().toISOString() };
+  return { ...base, can: { deliver, register: !!register }, register, csrf: c.csrf };
+}));
+post('/api/field/farmer', 'perm:farmers.edit', (c) => api(c, () => FL.registerOffline(c.actor, String(c.body.record ?? ''), c.files)));
 
 post('/api/intake', 'perm:stock.manage', (c) => api(c, async () => {
   const r = await I.ingest(c.actor, String(c.body.record ?? ''), c.files, { deviceClock: c.body.device_clock, userAgent: String(c.req.headers['user-agent'] || '') });

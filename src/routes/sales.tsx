@@ -34,9 +34,14 @@ post('/settlements/lines/:id/payout', 'perm:finance.approve', async (c) => {
   const ref = await db.val<string>('SELECT s.ref FROM settlement_lines sl JOIN settlements st ON st.id=sl.settlement_id JOIN sales s ON s.id=st.sale_id WHERE sl.id=$1', c.params.id);
   return act(c, `/sales/${ref ?? ''}`, async () => { await PS.requestPayout(c.actor, c.params.id); return 'Payout requested. Someone else in finance approves it to send.'; });
 });
+const payoutSale = (id: string) => db.val<string>(`SELECT s.ref FROM payouts p JOIN settlement_lines sl ON sl.id=p.line_id JOIN settlements st ON st.id=sl.settlement_id JOIN sales s ON s.id=st.sale_id WHERE p.id=$1`, id);
+post('/payouts/:id/code', 'perm:finance.approve', async (c) => act(c, `/sales/${(await payoutSale(c.params.id)) ?? ''}`, async () => { await PS.confirmPayoutCode(c.actor, c.params.id, c.body.otp); return 'Code accepted. The money is on its way; the line is marked paid when the bank confirms.'; }));
+post('/payouts/:id/resend', 'perm:finance.approve', async (c) => act(c, `/sales/${(await payoutSale(c.params.id)) ?? ''}`, async () => { await PS.resendPayoutCode(c.actor, c.params.id); return 'Paystack is sending the code again.'; }));
+post('/payouts/:id/cancel', 'perm:finance.approve', async (c) => act(c, `/sales/${(await payoutSale(c.params.id)) ?? ''}`, async () => { await PS.cancelPayout(c.actor, c.params.id); return 'Payout cancelled. It can be asked for again.'; }));
 post('/payouts/:id/approve', 'perm:finance.approve', async (c) => {
   const ref = await db.val<string>('SELECT s.ref FROM payouts p JOIN settlement_lines sl ON sl.id=p.line_id JOIN settlements st ON st.id=sl.settlement_id JOIN sales s ON s.id=st.sale_id WHERE p.id=$1', c.params.id);
-  return act(c, `/sales/${ref ?? ''}`, async () => { await PS.approvePayout(c.actor, c.params.id); return 'Sent to Paystack. The line is marked paid when the bank confirms.'; });
+  return act(c, `/sales/${ref ?? ''}`, async () => (await PS.approvePayout(c.actor, c.params.id)) === 'otp'
+    ? 'Paystack has sent a code to the Paystack account owner’s phone. Enter it below to send the money.' : 'Sent to Paystack. The line is marked paid when the bank confirms.');
 });
 post('/settlements/lines/:id/paid', 'perm:finance.approve', async (c) => {
   const ref = await db.val<string>('SELECT s.ref FROM settlement_lines sl JOIN settlements st ON st.id=sl.settlement_id JOIN sales s ON s.id=st.sale_id WHERE sl.id=$1', c.params.id);

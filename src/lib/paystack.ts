@@ -100,12 +100,46 @@ export async function approvePayout(a: Actor, payoutId: string) {
     const t = await ps('/transfer', 'POST', { source: 'balance', amount: Math.round(p.amount), recipient: p.recipient_code, reference: p.reference, reason: `StorageX sale payout ${p.reference}` });
     await db.run('UPDATE payouts SET transfer_code=$2 WHERE id=$1', payoutId, t?.transfer_code ?? null);
     if (t?.status === 'success') await finishPayout(p.reference, 'succeeded');
-    else if (t?.status === 'otp') throw new UserError('Paystack asks for an OTP on transfers. Turn off “Confirm transfers before sending” in the Paystack dashboard (Settings → Preferences) for API transfers.');
+    else if (t?.status === 'otp') {
+      // The Paystack account asks for a one-time code on every transfer (kept on because other platforms share it).
+      await db.run(`UPDATE payouts SET status='awaiting_otp' WHERE id=$1`, payoutId);
+      await audit(actorOf(a), 'payout.awaiting_code', { entity: 'payout', entityId: payoutId, data: { ref: p.reference } });
+      return 'otp' as const;
+    }
   } catch (e) {
     await db.run(`UPDATE payouts SET status='requested', approved_by=NULL, sent_at=NULL, failure_reason=$2 WHERE id=$1 AND transfer_code IS NULL`, payoutId, String((e as Error).message).slice(0, 200));
     throw e;
   }
   await audit(actorOf(a), 'payout.sent', { entity: 'payout', entityId: payoutId, data: { ref: p.reference, kobo: p.amount } });
+  return 'sent' as const;
+}
+
+/** The approver types the code Paystack sent to the account owner's phone; Paystack then sends the money. */
+export async function confirmPayoutCode(a: Actor, payoutId: string, code: string) {
+  needFin(a);
+  const p = await db.get<any>(`SELECT * FROM payouts WHERE id=$1`, payoutId);
+  if (!p || p.status !== 'awaiting_otp') throw new UserError('This payout is not waiting for a code.');
+  if (p.approved_by !== a.user.id) throw new UserError('The person who approved this payout enters its code.');
+  const otp = String(code ?? '').replace(/\s+/g, '');
+  if (!/^\d{4,8}$/.test(otp)) throw new UserError('Enter the code Paystack sent (digits only).');
+  const t = await ps('/transfer/finalize_transfer', 'POST', { transfer_code: p.transfer_code, otp });
+  await db.run(`UPDATE payouts SET status='sent' WHERE id=$1 AND status='awaiting_otp'`, payoutId);
+  if (t?.status === 'success') await finishPayout(p.reference, 'succeeded');
+  await audit(actorOf(a), 'payout.sent', { entity: 'payout', entityId: payoutId, data: { ref: p.reference, kobo: Number(p.amount_kobo), with_code: true } });
+}
+/** Ask Paystack to send the code again. */
+export async function resendPayoutCode(a: Actor, payoutId: string) {
+  needFin(a);
+  const p = await db.get<any>(`SELECT * FROM payouts WHERE id=$1`, payoutId);
+  if (!p || p.status !== 'awaiting_otp') throw new UserError('This payout is not waiting for a code.');
+  await ps('/transfer/resend_otp', 'POST', { transfer_code: p.transfer_code, reason: 'transfer' });
+}
+/** Give up on a payout stuck waiting for a code, so it can be asked for again. */
+export async function cancelPayout(a: Actor, payoutId: string) {
+  needFin(a);
+  const n = await db.run(`UPDATE payouts SET status='cancelled', finished_at=now(), failure_reason='Cancelled while waiting for the Paystack code' WHERE id=$1 AND status='awaiting_otp'`, payoutId);
+  if (!n) throw new UserError('Only a payout waiting for its code can be cancelled here.');
+  await audit(actorOf(a), 'payout.cancelled', { entity: 'payout', entityId: payoutId });
 }
 async function finishPayout(reference: string, outcome: 'succeeded' | 'failed' | 'reversed', reason?: string) {
   const p = await db.get<any>('SELECT * FROM payouts WHERE reference=$1', reference);

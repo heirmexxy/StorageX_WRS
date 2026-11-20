@@ -112,6 +112,10 @@ export function SalePage({ c, s, pay }: { c: Ctx; s: any; pay?: { connected: boo
               <tr key={l.id}><td className="mono">{l.receipt_no}</td><td>{l.party === 'kitovu' ? 'Kitovu' : l.party === 'lender' ? l.org_name : l.farmer_name}</td><td>{l.label}</td><td>{N(l.amount)}</td>
                 <td>{l.party === 'kitovu' ? '—' : l.paid_at ? `${l.paid_ref} · ${fmtDay(l.paid_at)}` : fin(c) && l.amount > 0 ? (() => {
                   const po = pay?.payouts.find((p) => p.line_id === l.id);
+                  if (po && po.status === 'awaiting_otp') return <>{`Waiting for the Paystack code (sent to the account owner’s phone), approved by ${po.approved_name}`}
+                    <form method="post" action={`/payouts/${po.id}/code`} className="row"><Csrf c={c} /><input name="otp" inputMode="numeric" autoComplete="one-time-code" placeholder="Code" aria-label="Paystack code" required /><button className="primary">Send money</button></form>
+                    <form method="post" action={`/payouts/${po.id}/resend`} className="inline"><Csrf c={c} /><button className="link">Send the code again</button></form>
+                    <form method="post" action={`/payouts/${po.id}/cancel`} className="inline"><Csrf c={c} /><button className="link">Cancel this payout</button></form></>;
                   if (po && po.status === 'requested') return <>{`Payout to ${po.bank_name} …${po.account_last4}, asked by ${po.requested_name}`}{po.failure_reason ? <><br /><small className="bad">{po.failure_reason}</small></> : null}<form method="post" action={`/payouts/${po.id}/approve`}><Csrf c={c} /><button className="primary">Approve and send</button></form></>;
                   if (po && po.status === 'sent') return `Sent to ${po.bank_name} …${po.account_last4}; waiting for the bank`;
                   return <>{po && ['failed', 'reversed'].includes(po.status) && <small className="bad">{`Last payout ${po.status}: ${po.failure_reason ?? ''}`}<br /></small>}

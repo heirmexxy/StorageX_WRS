@@ -15,7 +15,7 @@ export const FlagList = ({ flags }: { flags: Flag[] }) => (
 export function IntakesPage({ c, rows, q }: { c: Ctx; rows: any[]; q: Record<string, string> }) {
   return (
     <Page c={c} title="Deliveries">
-      <div className="head"><h1>Deliveries</h1><a className="button primary" href="/intake/">Open the gate app</a></div>
+      <div className="head"><h1>Deliveries</h1><a className="button primary" href="/intake/">Open the field app</a></div>
       <section className="card">
         <p><b>Gate app for clerks:</b> open <a href="/intake/">/intake</a> on the phone once with network and sign in, then use the browser menu’s <i>Add to Home screen</i>. It records deliveries with no network and uploads them later. Works in Chrome on Android 5 and newer; on older phones, keep the page open while offline.</p>
       </section>

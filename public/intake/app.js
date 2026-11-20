@@ -1,13 +1,13 @@
-/* StorageX gate app: records deliveries offline and uploads them later.
+/* StorageX field app: records deliveries and registers farmers offline, and uploads them later.
  * Written as plain ES5 (no let/const, arrow functions, classes, Promises, fetch or async) so it runs on old
  * Android browsers. Storage is IndexedDB; photos are kept as base64 text, which old browsers can store.
  * Each saved record is sealed with SHA-256 over its fields and photo hashes, and chained to the previous record
  * on this phone, so the server can tell if anything was changed or deleted before upload. */
 (function () {
   'use strict';
-  var VERSION = '3.0.0';
+  var VERSION = '4.0.0';
   var $app = document.getElementById('app');
-  var state = { boot: null, device: null, warehouseId: null, records: [], online: navigator.onLine !== false, syncing: false, signedOut: false, msg: null, form: null, screen: 'home' };
+  var state = { boot: null, device: null, warehouseId: null, records: [], people: [], reg: null, online: navigator.onLine !== false, syncing: false, signedOut: false, msg: null, form: null, screen: 'home' };
 
   // ---------- small helpers ----------
   function h(tag, attrs, kids) {
@@ -95,12 +95,13 @@
   function openDb(cb) {
     var ix = window.indexedDB || window.webkitIndexedDB || window.mozIndexedDB;
     if (!ix) return cb(new Error('This browser cannot store records offline. Use Chrome or another up-to-date browser.'));
-    var req = ix.open('storagex-intake', 1);
+    var req = ix.open('storagex-intake', 2);
     req.onupgradeneeded = function () {
       var d = req.result;
       if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
       if (!d.objectStoreNames.contains('records')) d.createObjectStore('records', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('photos')) d.createObjectStore('photos', { keyPath: 'sha' });
+      if (!d.objectStoreNames.contains('people')) d.createObjectStore('people', { keyPath: 'id' });   // farmers registered offline
     };
     req.onsuccess = function () { idb = req.result; cb(null); };
     req.onerror = function () { cb(req.error || new Error('Storage could not be opened.')); };
@@ -111,6 +112,12 @@
     var out = [], r = idb.transaction('records', 'readonly').objectStore('records').openCursor();
     r.onsuccess = function () { var c = r.result; if (c) { out.push(c.value); c['continue'](); } else { out.sort(function (a, b) { return a.record.device_seq - b.record.device_seq; }); cb(out); } };
   }
+  function allPeople(cb) {
+    var out = [], r = idb.transaction('people', 'readonly').objectStore('people').openCursor();
+    r.onsuccess = function () { var c = r.result; if (c) { out.push(c.value); c['continue'](); } else { out.sort(function (a, b) { return a.saved_at < b.saved_at ? -1 : 1; }); cb(out); } };
+  }
+  function savePerson(p, cb) { var t = idb.transaction('people', 'readwrite'); t.objectStore('people').put(p); t.oncomplete = function () { if (cb) cb(); }; t.onerror = function () { if (cb) cb(t.error || new Error('Could not save on this phone.')); }; }
+  function canDo(what) { var c = state.boot && state.boot.can; return c ? !!c[what] : what === 'deliver'; }
   function getPhoto(sha, cb) { var r = idb.transaction('photos', 'readonly').objectStore('photos').get(sha); r.onsuccess = function () { cb(r.result); }; }
 
   // ---------- network (XMLHttpRequest works everywhere) ----------
@@ -227,17 +234,18 @@
 
   // ---------- upload ----------
   function pending() { return state.records.filter(function (r) { return r.status === 'saved' || r.status === 'retry'; }); }
+  function pendingPeople() { return state.people.filter(function (p) { return p.status === 'saved' || p.status === 'retry'; }); }
   function sync(done) {
     if (state.syncing || !navigator.onLine && navigator.onLine !== undefined) return done && done();
     var queue = pending();
-    if (!queue.length) return done && done();
+    if (!queue.length && !pendingPeople().length) return done && done();
     state.syncing = true; render();
     loadBoot(function (b) {
       if (!b.json) { state.syncing = false; render(); return done && done(); }
       next(0);
     });
     function next(i) {
-      if (i >= queue.length) { state.syncing = false; refresh(); return done && done(); }
+      if (i >= queue.length) { return syncPeople(function () { state.syncing = false; refresh(); if (done) done(); }); }
       var item = queue[i], rec = item.record, shas = photosOf(rec), fd = new FormData(), k = 0;
       if (rec.clerk_user_id !== state.boot.user.id) { item.status = 'retry'; item.error = 'Saved by another person: they must sign in to upload it.'; save(item); return next(i + 1); }
       fd.append('_csrf', state.boot.csrf); fd.append('record', JSON.stringify(rec)); fd.append('device_clock', new Date().toISOString());
@@ -264,6 +272,43 @@
       }
     }
   }
+  // Farmers registered offline: one upload each; the server returns the farmer's code. The ID number is wiped from
+  // the phone once uploaded.
+  function syncPeople(cb) {
+    var q = pendingPeople();
+    (function one(i) {
+      if (i >= q.length || state.signedOut) return cb();
+      var p = q[i], fd = new FormData(), shas = [p.photo, p.id_photo].filter(Boolean);
+      if (p.record.user !== state.boot.user.id) { p.status = 'retry'; p.error = 'Saved by another person: they must sign in to upload it.'; return savePerson(p, function () { one(i + 1); }); }
+      fd.append('_csrf', state.boot.csrf); fd.append('record', JSON.stringify(p.record));
+      var names = { }; names[p.photo] = 'photo'; if (p.id_photo) names[p.id_photo] = 'id_doc';
+      (function addPhoto(k) {
+        if (k >= shas.length) return send();
+        getPhoto(shas[k], function (ph) {
+          if (ph) fd.append(names[shas[k]], new Blob([b64bytes(ph.b64)], { type: ph.mime }), shas[k] + '.jpg');
+          addPhoto(k + 1);
+        });
+      })(0);
+      function send() {
+        xhr('POST', '/api/field/farmer', fd, function (r) {
+          if (r.status === 200 && r.json && r.json.result === 'duplicate_suspected') {
+            p.status = 'error'; p.dup = r.json.matches; p.error = 'Maybe already registered: ' + r.json.matches.join('; ') + '.';
+            return savePerson(p, function () { one(i + 1); });
+          }
+          if (r.status === 200 && r.json) {
+            p.status = 'uploaded'; p.code = r.json.code; p.warnings = r.json.warnings || []; p.error = null; p.dup = null; p.uploaded_at = new Date().toISOString();
+            p.record.id_number = null; p.record.phone = p.record.phone ? '…' + String(p.record.phone).slice(-4) : null; p.record.witness = null;
+            return savePerson(p, function () { dropPhotos(shas); one(i + 1); });
+          }
+          if (r.signedOut) { state.signedOut = true; return cb(); }
+          if (r.status === 0 || r.status >= 500) { p.status = 'retry'; p.error = 'No connection. Will try again.'; return savePerson(p, cb); }
+          p.status = 'error'; p.error = (r.json && r.json.error) || ('Upload refused (' + r.status + ')');
+          savePerson(p, function () { one(i + 1); });
+        });
+      }
+    })(0);
+  }
+
   function photosOf(rec) {
     var s = [], i;
     for (i = 0; i < rec.weighings.length; i++) if (rec.weighings[i].photo) s.push(rec.weighings[i].photo);
@@ -274,12 +319,12 @@
   }
   function dropPhotos(shas) { var t = idb.transaction('photos', 'readwrite'), st = t.objectStore('photos'); for (var i = 0; i < shas.length; i++) st['delete'](shas[i]); }
   function save(item, cb) { var t = idb.transaction('records', 'readwrite'); t.objectStore('records').put(item); t.oncomplete = function () { if (cb) cb(); }; }
-  function refresh() { allRecords(function (rs) { state.records = rs; render(); }); }
+  function refresh() { allRecords(function (rs) { state.records = rs; allPeople(function (ps) { state.people = ps; render(); }); }); }
 
   // ---------- screens ----------
   function render() {
     var top = h('header', { className: 'bar' }, [
-      h('b', null, 'StorageX gate'),
+      h('b', null, 'StorageX field'),
       h('span', { className: 'dot ' + (state.online ? 'on' : 'off') }, state.online ? 'Online' : 'Offline'),
       state.boot && state.boot.user ? h('span', { className: 'who' }, state.boot.user.name) : null
     ]);
@@ -287,6 +332,7 @@
     if (state.fatal) body = h('div', { className: 'card' }, [h('h2', null, 'This phone cannot run the app'), h('p', null, state.fatal)]);
     else if (!state.boot) body = h('div', { className: 'card' }, [h('h2', null, 'Sign in first'), h('p', null, 'Open this page once with a network connection and sign in. After that it works without network.'), h('a', { className: 'btn primary', href: '/login?next=/intake/' }, 'Sign in')]);
     else if (state.screen === 'form') body = formScreen();
+    else if (state.screen === 'reg') body = regScreen();
     else body = homeScreen();
     $app.innerHTML = '';
     $app.appendChild(top);
@@ -296,7 +342,19 @@
   }
 
   function homeScreen() {
-    var b = state.boot, whs = b.warehouses, p = pending().length;
+    var b = state.boot, whs = b.warehouses || [], p = pending().length + pendingPeople().length;
+    var people = state.people.slice().reverse().slice(0, 30).map(function (x) {
+      var label = { saved: 'Waiting to upload', retry: 'Will retry', uploaded: 'Registered', error: 'Problem' }[x.status];
+      return h('li', { className: 'rec ' + x.status }, [
+        h('div', null, [h('b', null, x.record.full_name), x.code ? ' · ' + x.code : '', ' · ', x.record.kind === 'agribusiness' ? 'agribusiness' : 'farmer']),
+        h('small', null, [when(x.saved_at), ' · ', label, x.error ? ' · ' + x.error : '']),
+        x.warnings && x.warnings.length ? h('small', { className: 'flags' }, 'Still to do: ' + x.warnings.join(' ')) : null,
+        x.dup ? h('div', null, [
+          h('button', { className: 'link', onclick: function () { x.record.not_duplicate = true; x.status = 'saved'; x.error = null; x.dup = null; savePerson(x, function () { refresh(); sync(); }); } }, 'It is a different person: upload anyway'),
+          h('button', { className: 'link danger', onclick: function () { if (!window.confirm('Delete this registration from the phone?')) return; var t = idb.transaction('people', 'readwrite'); t.objectStore('people')['delete'](x.id); t.oncomplete = function () { dropPhotos([x.photo, x.id_photo].filter(Boolean)); refresh(); }; } }, 'Same person: delete from this phone')
+        ]) : null
+      ]);
+    });
     var list = state.records.slice().reverse().slice(0, 50).map(function (r) {
       var label = { saved: 'Waiting to upload', retry: 'Will retry', uploaded: 'Uploaded', error: 'Problem' }[r.status];
       return h('li', { className: 'rec ' + r.status }, [
@@ -307,28 +365,33 @@
     });
     return h('div', null, [
       state.signedOut ? h('p', { className: 'msg error' }, ['Your sign-in has expired. ', h('a', { href: '/login?next=/intake/' }, 'Sign in again'), ' to upload. Saved records are safe on this phone.']) : null,
-      h('div', { className: 'card' }, [
+      canDo('register') ? h('div', { className: 'card' }, [
+        h('button', { className: 'btn primary big', onclick: function () { state.reg = newReg(); state.screen = 'reg'; state.msg = null; render(); window.scrollTo(0, 0); } }, 'Register a farmer'),
+        h('p', { className: 'small' }, 'Works without network. The farmer gets their code when it uploads.')
+      ]) : null,
+      canDo('deliver') ? h('div', { className: 'card' }, [
         h('label', { className: 'field' }, [h('span', null, 'Warehouse'),
           h('select', { onchange: function (e) { state.warehouseId = e.target.value; kvSet('warehouse', state.warehouseId); render(); } },
             [h('option', { value: '' }, 'Choose…')].concat(whs.map(function (w) { var o = h('option', { value: w.id }, w.name); if (w.id === state.warehouseId) o.selected = true; return o; })))]),
         h('button', { className: 'btn primary big', disabled: !state.warehouseId, onclick: function () { state.form = newForm(); state.screen = 'form'; state.msg = null; render(); window.scrollTo(0, 0); } }, 'Record a delivery')
-      ]),
+      ]) : null,
       h('div', { className: 'card' }, [
         h('div', { className: 'row' }, [
           h('b', null, p ? p + ' waiting to upload' : 'All uploaded'),
           h('button', { className: 'btn', disabled: !p || state.syncing || !state.online, onclick: function () { sync(); } }, state.syncing ? 'Uploading…' : 'Upload now')
         ]),
         h('p', { className: 'small' }, 'Records upload by themselves when there is network and this page is open. Do not clear the browser’s data while anything is waiting.'),
-        list.length ? h('ul', { className: 'recs' }, list) : h('p', { className: 'small' }, 'No deliveries on this phone yet.')
+        people.length ? h('ul', { className: 'recs' }, people) : null,
+        list.length ? h('ul', { className: 'recs' }, list) : (people.length ? null : h('p', { className: 'small' }, 'Nothing recorded on this phone yet.'))
       ]),
       h('p', { className: 'small' }, ['Farmer list updated ', b.serverTime ? when(b.serverTime) : '—', ' · app ' + VERSION + ' · ', h('a', { href: '/app' }, 'Main site')])
     ]);
   }
 
-  function photoInput(label, onPhoto, thumb) {
+  function photoInput(label, onPhoto, thumb, facing) {
     return h('div', { className: 'photo' }, [
       h('label', { className: 'btn' }, [thumb ? 'Retake: ' + label : label,
-        h('input', { type: 'file', accept: 'image/*', capture: 'environment', className: 'hidden', onchange: function (e) {
+        h('input', { type: 'file', accept: 'image/*', capture: facing || 'environment', className: 'hidden', onchange: function (e) {
           var file = e.target.files && e.target.files[0]; if (!file) return;
           takePhoto(file, function (err, p) { if (err) { state.msg = { type: 'error', text: err.message }; render(); return; } onPhoto(p); render(); });
         } })]),
@@ -428,6 +491,110 @@
     ]);
   }
 
+  // ---------- registering a farmer or agribusiness offline ----------
+  function newReg() {
+    var r = { id: uuid(), kind: 'individual', full_name: '', phone: '', sex: '', year_of_birth: '', state_code: '', lga: '', community: '', commodities: [],
+      business_reg_no: '', contact_person: '', contact_role: '', photo: null, photo_thumb: null, id_type: '', id_number: '', id_photo: null, id_thumb: null,
+      phone_check: 'later', witness_name: '', witness_role: '', witness_phone: '', witness_reason: 'no_phone', declare: false };
+    kvGet('last_state', function (s) { if (s && !r.state_code) { r.state_code = s; if (state.reg === r) render(); } });
+    return r;
+  }
+  function regProblems(r) {
+    var p = [], biz = r.kind === 'agribusiness', reg = state.boot.register || {};
+    if (biz ? r.full_name.trim().length < 3 : !/\S+\s+\S+/.test(r.full_name.trim())) p.push(biz ? 'Business name' : 'First name and surname');
+    if (biz && !/\S+\s+\S+/.test(r.contact_person.trim())) p.push('Contact person’s full name');
+    if (r.phone && String(r.phone).replace(/\D/g, '').length < 10) p.push('Phone number looks too short');
+    if (!r.state_code) p.push('State');
+    if (!r.commodities.length) p.push('At least one crop');
+    if (!r.photo) p.push('Profile photo');
+    if (r.id_type && !r.id_number) p.push('ID number');
+    if (r.id_type && !r.id_photo) p.push('Photo of the ID');
+    if (r.phone_check === 'witness' && (!/\S+\s+\S+/.test(r.witness_name) || !r.witness_role || String(r.witness_phone).replace(/\D/g, '').length < 10 || !r.declare)) p.push('Witness details and declaration');
+    if (r.id_type && reg.canCheckId === false) p.push('Your role cannot send identity checks: leave the ID out');
+    return p;
+  }
+  function regScreen() {
+    var r = state.reg, b = state.boot, reg = b.register || { states: [], crops: [], idTypes: [] }, biz = r.kind === 'agribusiness';
+    function sel(label, value, opts, onchange, blank) {
+      return h('label', { className: 'field' }, [h('span', null, label), h('select', { onchange: function (e) { onchange(e.target.value); render(); } },
+        (blank ? [h('option', { value: '' }, blank)] : []).concat(opts.map(function (o) { var el = h('option', { value: o[0] }, o[1]); if (o[0] === value) el.selected = true; return el; })))]);
+    }
+    var probs = regProblems(r);
+    return h('div', null, [
+      h('div', { className: 'card' }, [
+        h('h2', null, 'Who is storing'),
+        sel('This is', r.kind, [['individual', 'A farmer'], ['agribusiness', 'An agribusiness (company, co-op, enterprise)']], function (v) { r.kind = v; }),
+        input(biz ? 'Business name (as registered)' : 'Full name (as on their ID)', r.full_name, function (v) { r.full_name = v; }, { wide: true }),
+        biz ? h('div', null, [
+          input('Registration number (RC or BN)', r.business_reg_no, function (v) { r.business_reg_no = v; }, { ph: 'RC 1348965' }),
+          input('Contact person (full name)', r.contact_person, function (v) { r.contact_person = v; }),
+          input('Their role', r.contact_role, function (v) { r.contact_role = v; }, { ph: 'Managing director' })
+        ]) : h('div', { className: 'grid2' }, [
+          sel('Sex', r.sex, [['female', 'Female'], ['male', 'Male']], function (v) { r.sex = v; }, 'Choose…'),
+          input('Year of birth', r.year_of_birth, function (v) { r.year_of_birth = v; }, { mode: 'numeric', ph: '1985' })
+        ]),
+        input('Phone number', r.phone, function (v) { r.phone = v; }, { type: 'tel', mode: 'tel', ph: '0803 000 0000', hint: biz ? 'The contact person’s phone' : 'The farmer’s own phone if they have one' })
+      ]),
+      h('div', { className: 'card' }, [
+        h('h2', null, 'Where'),
+        sel('State', r.state_code, reg.states.map(function (s) { return [s.code, s.name]; }), function (v) { r.state_code = v; kvSet('last_state', v); }, 'Choose…'),
+        input('Local government area', r.lga, function (v) { r.lga = v; }),
+        input('Village or community', r.community, function (v) { r.community = v; })
+      ]),
+      h('div', { className: 'card' }, [
+        h('h2', null, 'Crops'),
+        h('div', null, reg.crops.map(function (c) {
+          var on = r.commodities.indexOf(c.code) >= 0;
+          return h('label', { className: 'check' }, [h('input', { type: 'checkbox', checked: on, onchange: function (e) { if (e.target.checked) { if (r.commodities.indexOf(c.code) < 0) r.commodities.push(c.code); } else r.commodities = r.commodities.filter(function (x) { return x !== c.code; }); } }), ' ' + c.name]);
+        }))
+      ]),
+      h('div', { className: 'card' }, [
+        h('h2', null, 'Profile photo'),
+        h('p', { className: 'small' }, biz ? 'A clear photo of the contact person’s face.' : 'A clear photo of the farmer’s face, in good light, no hat or glasses.'),
+        photoInput('Take photo', function (p) { r.photo = p.sha; r.photo_thumb = p.thumb; }, r.photo_thumb, 'user')
+      ]),
+      h('div', { className: 'card' }, [
+        h('h2', null, 'Identity check (optional now)'),
+        reg.canCheckId === false ? h('p', { className: 'small' }, 'Your role registers farmers; Kitovu field staff do the identity check.') : h('div', null, [
+          sel('Type of ID', r.id_type, reg.idTypes.map(function (t) { return [t.code, t.label]; }), function (v) { r.id_type = v; }, 'No ID now'),
+          r.id_type ? h('div', null, [
+            input('ID number', r.id_number, function (v) { r.id_number = v; }, { hint: (reg.idTypes.filter(function (t) { return t.code === r.id_type; })[0] || {}).hint + '. Only the last 4 digits are kept; the full number is removed from this phone after upload.' }),
+            photoInput('Photo of the ID', function (p) { r.id_photo = p.sha; r.id_thumb = p.thumb; }, r.id_thumb)
+          ]) : null
+        ])
+      ]),
+      h('div', { className: 'card' }, [
+        h('h2', null, 'Phone check'),
+        sel('How', r.phone_check, [['later', 'Send a code later, when there is network']].concat(reg.witnessed ? [['witness', 'Witnessed now (no working phone or no signal)']] : []), function (v) { r.phone_check = v; }),
+        r.phone_check === 'witness' ? h('div', null, [
+          sel('Why no code', r.witness_reason, [['no_phone', 'No phone'], ['no_signal', 'No signal here'], ['code_not_received', 'Code did not arrive'], ['shared_phone', 'Shares a phone']], function (v) { r.witness_reason = v; }),
+          input('Witness full name', r.witness_name, function (v) { r.witness_name = v; }),
+          input('Witness role', r.witness_role, function (v) { r.witness_role = v; }, { ph: 'Cooperative chairman, village head…' }),
+          input('Witness phone', r.witness_phone, function (v) { r.witness_phone = v; }, { type: 'tel', mode: 'tel' }),
+          h('label', { className: 'check' }, [h('input', { type: 'checkbox', checked: r.declare, onchange: function (e) { r.declare = e.target.checked; render(); } }), ' The witness knows this person and confirmed who they are in front of me.'])
+        ]) : null
+      ]),
+      h('div', { className: 'card' }, [
+        r.tried && probs.length ? h('div', null, [h('b', null, 'Still needed:'), h('ul', { className: 'todo' }, probs.map(function (x) { return h('li', null, x); }))]) : null,
+        h('button', { className: 'btn primary big', onclick: function () {
+          if (regProblems(r).length) { r.tried = true; render(); var el = document.querySelector('.todo'); if (el && el.scrollIntoView) el.scrollIntoView(); return; }
+          var rec = { id: r.id, kind: r.kind, full_name: r.full_name.trim(), phone: r.phone || null, sex: biz ? null : r.sex || null, year_of_birth: biz ? null : r.year_of_birth || null,
+            state_code: r.state_code, lga: r.lga || null, community: r.community || null, commodities: r.commodities,
+            business_reg_no: biz ? r.business_reg_no || null : null, contact_person: biz ? r.contact_person : null, contact_role: biz ? r.contact_role || null : null,
+            id_type: r.id_type || null, id_number: r.id_type ? r.id_number : null,
+            witness: r.phone_check === 'witness' ? { witness_name: r.witness_name, witness_role: r.witness_role, witness_phone: r.witness_phone, reason: r.witness_reason, declare: r.declare } : null,
+            user: b.user.id, captured_at: new Date().toISOString() };
+          savePerson({ id: r.id, status: 'saved', saved_at: rec.captured_at, record: rec, photo: r.photo, id_photo: r.id_type ? r.id_photo : null }, function (err) {
+            if (err) { state.msg = { type: 'error', text: err.message }; return render(); }
+            state.reg = null; state.screen = 'home'; state.msg = { type: 'ok', text: 'Saved ' + rec.full_name + '. They get their farmer code when it uploads.' };
+            refresh(); setTimeout(function () { sync(); }, 300); window.scrollTo(0, 0);
+          });
+        } }, 'Save registration'),
+        h('button', { className: 'link', onclick: function () { state.reg = null; state.screen = 'home'; render(); } }, 'Cancel (nothing is saved)')
+      ])
+    ]);
+  }
+
   function codeBlock(f) {
     var b = state.boot;
     if (f.token) return h('p', { className: 'ok' }, 'Confirmed by the farmer’s code.');
@@ -457,7 +624,7 @@
   // ---------- start ----------
   window.addEventListener('online', function () { state.online = true; render(); sync(); });
   window.addEventListener('offline', function () { state.online = false; render(); });
-  setInterval(function () { if (state.online && pending().length && !state.syncing && state.screen === 'home') sync(); }, 60000);
+  setInterval(function () { if (state.online && (pending().length || pendingPeople().length) && !state.syncing && state.screen === 'home') sync(); }, 60000);
 
   openDb(function (err) {
     if (err) { state.fatal = err.message; return render(); }

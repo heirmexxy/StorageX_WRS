@@ -64,6 +64,12 @@ export const DEFAULTS = {
   'receipts.default_storage_months': 6,
   /** Warn the farmer, the lender and Kitovu this many days before a receipt's storage term ends. */
   'receipts.term_warn_days': 14,
+  /** Delivery photos are evidence for a receipt and any loan on it: kept this many years after the receipt closes. */
+  'retention.delivery_photo_years': 6,
+  /** Photos of a delivery that never became a receipt (rejected, or not issued): kept this many months. */
+  'retention.unissued_delivery_months': 12,
+  /** USSD menu log: kept this many months. */
+  'retention.ussd_log_months': 12,
 };
 export type SettingKey = keyof typeof DEFAULTS;
 export type Settings = typeof DEFAULTS;
@@ -105,6 +111,9 @@ export const LABELS: Record<SettingKey, string> = {
   'wareguard.offline_minutes': 'WareGuard: alert when a device has sent nothing for (minutes)',
   'receipts.default_storage_months': 'Storage term on a new receipt (months, 1 to 6)',
   'receipts.term_warn_days': 'Warn before a receipt’s storage term ends (days)',
+  'retention.delivery_photo_years': 'Keep delivery photos after the receipt closes (years)',
+  'retention.unissued_delivery_months': 'Keep photos of deliveries that never became a receipt (months)',
+  'retention.ussd_log_months': 'Keep the USSD menu log (months)',
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -130,7 +139,7 @@ export async function saveSettings(a: Actor, input: Partial<Record<SettingKey, u
     }
     else if (typeof def === 'number') {
       const v = Number(input[k]);
-      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000], 'fees.issuance_bp': [0, 500], 'fees.origination_bp': [0, 500], 'fees.certification_kobo': [0, 1e11], 'issuers.guarantee_pct': [0, 50], 'issuers.guarantee_min_kobo': [0, 1e12], 'notify.due_days': [1, 30], 'inspector.farmer_30d_kg': [1000, 1000000], 'alerts.ltv_warning_gap_pct': [1, 30], 'wareguard.max_temp_c': [15, 45], 'wareguard.max_rh_pct': [40, 95], 'wareguard.door_open_minutes': [5, 240], 'wareguard.offline_minutes': [10, 1440], 'receipts.default_storage_months': [1, 6], 'receipts.term_warn_days': [1, 60] } as Record<string, number[]>)[k] ?? [1, 180];
+      const [lo, hi] = ({ 'stock.tolerance_pct': [0, 5], 'price.min_observations': [1, 20], 'price.outlier_pct': [5, 100], 'price.drop_alert_pct': [1, 50], 'fees.storage_kobo_per_kg_month': [0, 5000], 'fees.handling_kobo_per_kg': [0, 5000], 'fees.sale_commission_bp': [0, 1000], 'fees.issuance_bp': [0, 500], 'fees.origination_bp': [0, 500], 'fees.certification_kobo': [0, 1e11], 'issuers.guarantee_pct': [0, 50], 'issuers.guarantee_min_kobo': [0, 1e12], 'notify.due_days': [1, 30], 'inspector.farmer_30d_kg': [1000, 1000000], 'alerts.ltv_warning_gap_pct': [1, 30], 'wareguard.max_temp_c': [15, 45], 'wareguard.max_rh_pct': [40, 95], 'wareguard.door_open_minutes': [5, 240], 'wareguard.offline_minutes': [10, 1440], 'receipts.default_storage_months': [1, 6], 'receipts.term_warn_days': [1, 60], 'retention.delivery_photo_years': [1, 10], 'retention.unissued_delivery_months': [1, 60], 'retention.ussd_log_months': [1, 60] } as Record<string, number[]>)[k] ?? [1, 180];
       if (!Number.isFinite(v) || v < lo || v > hi) throw new UserError(`${LABELS[k]}: between ${lo} and ${hi}.`);
       next[k] = v;
     }

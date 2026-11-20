@@ -18,6 +18,7 @@ export function FarmersPage({ c, rows, q, states }: { c: Ctx; rows: Farmer[]; q:
     <Page c={c} title="Farmers">
       <div className="head">
         <h1>Farmers</h1>
+        {can(c.membership, 'farmers.edit') && <a className="button" href="/intake/">Field app (works offline)</a>}
         {can(c.membership, 'farmers.edit') && <a className="button primary" href="/farmers/new">Register a farmer</a>}
       </div>
       {c.membership?.org_kind === 'lender' && <p className="muted">You see only farmers who have agreed to share their record with {c.membership.org_name}.</p>}

@@ -49,10 +49,10 @@ StorageX holds identity documents and selfies of farmers, financial information 
 | ID document photo (approved check) | 365 days after approval (`ID_DOC_RETENTION_DAYS`) | Daily job deletes the file; the decision, the hash and the last 4 digits remain |
 | ID photo and selfie (rejected check) | 30 days | Daily job |
 | Selfie (approved) | While the farmer is registered (it is the record's photo) | Deleted with the record on request, unless a live receipt or loan needs it |
-| Delivery evidence photos | While the receipt is live, then 6 years with the receipt (financial record) | To be added: a retention date on delivery photos (open action, section 8) |
+| Delivery evidence photos | While the receipt is live, then 6 years with the receipt (financial record) | Set in Admin → Settings (default 6 years after the receipt closes; 12 months if no receipt was issued) |
 | Receipts, loans, sales, audit log | 6 years after the last transaction (accounting and lending records) | Archived, then removed |
 | Backups | 30 days on the server and 30 days in Google Drive (encrypted) | Automatic |
-| USSD log | 12 months | To be added (open action) |
+| USSD log | 12 months (Admin → Settings) | Trimmed nightly |
 
 ## 5. Who receives data
 
@@ -97,7 +97,7 @@ A request is answered within 30 days. The DPO keeps a log of requests.
 1. NDPC registration and DPO appointment (section 2).
 2. Data processing agreements with Termii, Africa's Talking and Hostinger; a data sharing agreement with Accion.
 3. Cross-border transfer basis for Anthropic before setting the AI key in production.
-4. Add retention dates to delivery photos and the USSD log (small code change; Build 13 candidate).
+4. ~~Add retention dates to delivery photos and the USSD log~~ Done (Nov 2026): set under Admin → Settings → How long records are kept (defaults: 6 years after the receipt closes; 12 months for deliveries that never became a receipt; 12 months for the USSD log). DPO to confirm the periods.
 5. Privacy notice for farmers in English, Pidgin, Hausa and Yoruba, approved like the text templates.
 6. Breach response: notify the NDPC within 72 hours of becoming aware of a breach likely to affect farmers' rights (SOP 12).
 

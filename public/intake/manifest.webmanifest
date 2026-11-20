@@ -1,6 +1,6 @@
 {
-  "name": "StorageX gate",
-  "short_name": "SX Gate",
+  "name": "StorageX field",
+  "short_name": "SX Field",
   "description": "Record produce deliveries at Kitovu warehouses, with or without network.",
   "start_url": "/intake/",
   "scope": "/intake/",

@@ -1,6 +1,6 @@
 /* Keeps the gate app openable without network. App files: network first (so updates arrive), cache when offline.
    Uploads and the farmer list (/api/...) always go to the network; records themselves live in IndexedDB. */
-var CACHE = 'sx-gate-3';
+var CACHE = 'sx-gate-4';
 var SHELL = ['/intake/', '/intake/app.js', '/intake/intake.css', '/intake/manifest.webmanifest', '/intake/icon-192.png'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));

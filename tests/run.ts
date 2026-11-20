@@ -30,6 +30,9 @@ import * as N from '../src/lib/notify';
 import * as U from '../src/lib/ussd';
 import * as INS from '../src/lib/agents/intake-inspector';
 import * as TT from '../src/lib/titan';
+import * as FL from '../src/lib/field';
+import * as PSX from '../src/lib/paystack';
+import { applyRetention } from '../src/lib/files';
 import { config as CFG } from '../src/lib/config';
 import * as DS from '../src/lib/agents/data-steward';
 import { csvCell } from '../src/lib/util';
@@ -1955,6 +1958,88 @@ async function main() {
     await signInAs(officer);
     eq((await req('GET', '/review.csv')).status, 403);
     delete jar.sx_sid;
+  });
+  await t('field app: farmers registered offline upload once, with photo, witnessed phone check and ID check', async () => {
+    const netId = (await db.val<string>(`SELECT id FROM organisations WHERE code='AGENTS'`))!;
+    const lead = await makeUser(admin, 'field2@agents.test', netId, 'network_admin');
+    await signInAs(lead);
+    const boot = await req('GET', '/api/intake/bootstrap'); eq(boot.status, 200);
+    const bj = JSON.parse(boot.text); eq(bj.can, { deliver: false, register: true }); ok(bj.register.states.length > 30 && bj.register.idTypes.some((x: any) => x.code === 'nin'));
+    delete jar.sx_sid;
+    const id = crypto.randomUUID();
+    const rec = { id, kind: 'individual', full_name: 'Bilkisu Danjuma', phone: '08035550101', sex: 'female', year_of_birth: '1988', state_code: 'KD', lga: 'zaria', community: 'Samaru',
+      commodities: ['MAZ', 'SBN'], id_type: 'nin', id_number: '70345678912', witness: { witness_name: 'Sani Abubakar', witness_role: 'Cooperative chairman', witness_phone: '08035550202', reason: 'no_signal', declare: true } };
+    const r1 = await FL.registerOffline(ops, JSON.stringify(rec), { photo: jpeg(21), id_doc: jpeg(22) });
+    eq(r1.result, 'stored'); eq(r1.warnings, []);
+    const f = (await R.farmerByCode(ops, (r1 as any).code))!;
+    ok(f.profile_photo_id, 'profile photo'); eq(f.phone_check_method, 'attested'); eq(await db.val('SELECT kyc::text FROM farmers WHERE id=$1', f.id), 'pending'); eq(await db.val(`SELECT id_last4 FROM kyc_submissions WHERE farmer_id=$1`, f.id), '8912');
+    eq(await db.val(`SELECT l.name FROM farmers x JOIN lgas l ON l.id=x.lga_id WHERE x.id=$1`, f.id), 'Zaria');
+    const again = await FL.registerOffline(ops, JSON.stringify(rec), { photo: jpeg(21) });
+    eq(again.result, 'duplicate'); eq((again as any).code, f.code);
+    const dup = { ...rec, id: crypto.randomUUID(), full_name: 'Bilkisu Danjuma Musa', id_type: null, witness: null };
+    eq((await FL.registerOffline(ops, JSON.stringify(dup), { photo: jpeg(23) })).result, 'duplicate_suspected');
+    const ok2 = await FL.registerOffline(ops, JSON.stringify({ ...dup, not_duplicate: true }), { photo: jpeg(23) });
+    eq(ok2.result, 'stored');
+    const bad = await FL.registerOffline(ops, JSON.stringify({ ...rec, id: crypto.randomUUID(), full_name: 'Garba Ali', phone: '08035550303', id_number: '123', witness: null }), { photo: jpeg(24), id_doc: jpeg(25) });
+    eq(bad.result, 'stored'); ok(bad.warnings.some((w: string) => w.startsWith('Identity check')), 'a refused check is reported, the farmer is kept');
+    ok(await rejects(FL.registerOffline(officer, JSON.stringify({ ...rec, id: crypto.randomUUID() }), {})));
+    await signInAs(ops);
+    const bj2 = JSON.parse((await req('GET', '/api/intake/bootstrap')).text);
+    const fd = new FormData(); fd.set('_csrf', bj2.csrf); fd.set('record', JSON.stringify({ ...rec, id: crypto.randomUUID(), full_name: 'Ladi Yakubu', phone: '08035550404', id_type: null, witness: null }));
+    fd.set('photo', new Blob([jpeg(26).data], { type: 'image/jpeg' }), 'p.jpg');
+    const up = await fetch(base + '/api/field/farmer', { method: 'POST', body: fd, headers: { accept: 'application/json', cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') } });
+    eq(up.status, 200); ok((await up.json()).code);
+    eq(bj2.can, { deliver: true, register: true });
+    const app = await req('GET', '/intake/app.js'); ok(app.text.includes('Register a farmer') && app.text.includes('/api/field/farmer'));
+    delete jar.sx_sid;
+  });
+  await t('retention: delivery photos dated from the settings after their receipts close; old USSD lines trimmed', async () => {
+    const closed = await db.get<any>(`SELECT r.intake_id, to_char((r.closed_at AT TIME ZONE 'Africa/Lagos')::date + interval '6 years', 'YYYY-MM-DD') AS want FROM receipts r
+      WHERE r.intake_id IS NOT NULL AND r.status IN ('closed','settled') AND NOT EXISTS (SELECT 1 FROM receipts r2 WHERE r2.intake_id=r.intake_id AND r2.status NOT IN ('closed','settled','cancelled','expired')) LIMIT 1`);
+    ok(closed, 'a delivery whose receipts are all closed');
+    await db.run(`INSERT INTO ussd_log (session_id, phone_hash, screen, created_at) VALUES ('old', 'x', 'menu', now() - interval '400 days'), ('new', 'x', 'menu', now())`);
+    const r = await applyRetention();
+    ok(r.ussd >= 1);
+    eq(await db.val(`SELECT count(*)::int FROM ussd_log WHERE session_id='new'`), 1);
+    const files = await db.all<any>(`SELECT to_char(delete_after,'YYYY-MM-DD') AS d FROM files WHERE kind='intake_evidence' AND entity_id=$1 AND deleted_at IS NULL`, closed.intake_id);
+    ok(files.length && files.every((x: any) => x.d === closed.want), 'six years after the receipt closed');
+    const live = await db.val(`SELECT count(*)::int FROM files f JOIN receipts r ON r.intake_id=f.entity_id WHERE f.kind='intake_evidence' AND r.status='issued' AND f.delete_after IS NOT NULL`);
+    eq(live, 0, 'photos for live receipts have no deletion date');
+    await S.saveSettings(admin, { 'retention.delivery_photo_years': '7' } as any);
+    await applyRetention();
+    ok((await db.val<string>(`SELECT to_char(delete_after,'YYYY') FROM files WHERE kind='intake_evidence' AND entity_id=$1 LIMIT 1`, closed.intake_id))! > closed.want.slice(0, 4), 'a changed setting applies');
+    await rejects(db.run(`DELETE FROM ussd_log WHERE session_id='new'`));
+    await rejects(db.run(`UPDATE ussd_log SET screen='x' WHERE session_id='new'`));
+  });
+  await t('Paystack code kept on: the approver types the code Paystack sends, and only then is the money sent', async () => {
+    (CFG as any).paystackSecret = 'sk_test_fake';
+    const calls: string[] = [];
+    PSX.setTransport(async (url: string, init: any) => {
+      calls.push(url.replace(/^.*paystack\.co/, ''));
+      const j = (d: any) => ({ status: 200, json: async () => ({ status: true, data: d }) });
+      if (url.endsWith('/transfer/finalize_transfer')) { eq(JSON.parse(init.body).otp, '123456'); return j({ status: 'success', transfer_code: 'TRF_otp' }); }
+      if (url.endsWith('/transfer/resend_otp')) return j({});
+      if (url.endsWith('/transfer')) return j({ status: 'otp', transfer_code: 'TRF_otp' });
+      return j({});
+    });
+    try {
+      const old = (await db.get<any>(`SELECT p.* FROM payouts p WHERE p.status='succeeded' LIMIT 1`))!;
+      const ev = JSON.stringify({ event: 'transfer.reversed', data: { reference: old.reference, amount: Number(old.amount_kobo) } });
+      const sig = crypto.createHmac('sha512', 'sk_test_fake').update(ev).digest('hex');
+      eq((await fetch(`${base}/hooks/paystack`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-paystack-signature': sig }, body: ev })).status, 200);
+      await PSX.requestPayout(kfin, old.line_id);
+      const p = (await db.get<any>('SELECT * FROM payouts WHERE line_id=$1', old.line_id))!;
+      eq(await PSX.approvePayout(admin, p.id), 'otp');
+      eq(await db.val('SELECT status FROM payouts WHERE id=$1', p.id), 'awaiting_otp');
+      ok(!(await db.val('SELECT paid_at FROM settlement_lines WHERE id=$1', old.line_id)), 'not paid yet');
+      ok(await rejects(PSX.confirmPayoutCode(kfin, p.id, '123456')), 'the approver enters it');
+      ok(await rejects(PSX.confirmPayoutCode(admin, p.id, '12')));
+      await PSX.resendPayoutCode(admin, p.id);
+      await PSX.confirmPayoutCode(admin, p.id, '123 456');
+      eq(await db.val('SELECT status FROM payouts WHERE id=$1', p.id), 'succeeded');
+      ok(await db.val('SELECT paid_at FROM settlement_lines WHERE id=$1', old.line_id));
+      ok(calls.includes('/transfer/resend_otp') && calls.includes('/transfer/finalize_transfer'));
+    } finally { (CFG as any).paystackSecret = ''; }
   });
   server.close();
 

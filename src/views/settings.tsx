@@ -92,6 +92,13 @@ export function SettingsPage({ c, s, serverAiOff, hasKey, stats, links }: { c: C
           {box('alerts.sms')}
         </section>
         <section className="card">
+          <h2>How long records are kept</h2>
+          <p className="muted">Photos and logs are deleted automatically once these periods pass (checked every night). Receipts, loans, sales and the audit log are financial records and are not affected. Your data protection officer should confirm the periods; 6 years matches how long accounting records must be kept.</p>
+          {(['retention.delivery_photo_years', 'retention.unissued_delivery_months', 'retention.ussd_log_months'] as const).map((k) => (
+            <label className="field" key={k}><span>{LABELS[k]}</span><input name={k} type="number" step="1" defaultValue={String(s[k])} /></label>
+          ))}
+        </section>
+        <section className="card">
           <h2>Receipt storage terms</h2>
           <p className="muted">Every receipt carries a storage term of 1 to 6 months, chosen when it is issued. Each crop has its own limit (set under <a href="/commodities">Commodities</a>). Loans must be due before the term ends; the term can be extended.</p>
           {(['receipts.default_storage_months', 'receipts.term_warn_days'] as const).map((k) => (

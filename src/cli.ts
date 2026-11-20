@@ -168,6 +168,9 @@ async function main() {
       break;
     }
     case 'purge-files': {
+      const { applyRetention } = await import('./lib/files');
+      const r = await applyRetention();
+      console.log(`retention: ${r.dated} delivery photo date(s) set, ${r.ussd} USSD log line(s) removed`);
       console.log(`removed ${await purgeExpiredFiles()} expired file(s)`);
       break;
     }
