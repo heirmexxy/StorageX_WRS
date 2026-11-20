@@ -2,7 +2,7 @@ import type { Ctx } from '../lib/http';
 import type { ReceiptDoc } from '../lib/receipt-doc';
 import { ReceiptDocument } from './receipt-doc';
 import type { Receipt } from '../lib/receipts';
-import { EVENT_LABEL, termOf } from '../lib/receipts';
+import { EVENT_LABEL, termOf, ENDINGS } from '../lib/receipts';
 import { can } from '../lib/rbac';
 import { qrSvg } from '../lib/qr';
 import { Page, Csrf, fmtDate, fmtDay, Pager } from './layout';
@@ -13,6 +13,47 @@ import { ValueHistory } from './history';
 const changeText = (now: number, then: number) => { const d = ((now - then) / then) * 100; return `${d >= 0 ? 'up' : 'down'} ${Math.abs(d).toFixed(1)}%`; };
 
 const kg = (n: number | string) => `${Number(n).toLocaleString('en-NG', { maximumFractionDigits: 2 })} kg`;
+/** A receipt from the old system: what was not recorded then, filled in later from paper records (newest first). */
+function OldRecord({ c, r, events, edit }: { c: Ctx; r: Receipt; events: any[]; edit: boolean }) {
+  const added = events.filter((e) => e.event_type === 'history_added').reverse();
+  const naira = (n: number | null) => (n == null ? null : `₦${n.toLocaleString('en-NG')}/kg`);
+  return (
+    <section className="card">
+      <h2>From the old StorageX system</h2>
+      <p className="muted">This receipt was brought over from the system used in 2021–22. Its original facts cannot change; what the paper records show is added below, marked with who added it and the source.</p>
+      {added.map((e) => {
+        const d = e.data ?? {};
+        const rows: [string, string | null][] = [['Grade', d.grade], ['Moisture', d.moisture_pct != null ? `${d.moisture_pct}%` : null], ['Bags', d.bags != null ? String(d.bags) : null],
+          ['Price at storage', naira(d.naira_per_kg_at_storage)], ['How it ended', d.ended ? ENDINGS[d.ended as keyof typeof ENDINGS] : null], ['Ended on', d.ended_on], ['Buyer', d.buyer], ['Sale price', naira(d.sale_naira_per_kg)]];
+        return (
+          <div key={e.seq} className="added">
+            <dl className="facts">{rows.filter(([, v]) => v).map(([k, v]) => <><dt key={k}>{k}</dt><dd>{v}</dd></>)}</dl>
+            <p className="small muted">{`Added ${fmtDate(e.occurred_at)} by ${e.actor_name ?? e.actor}. Source: ${d.source}`}</p>
+          </div>
+        );
+      })}
+      {edit && (
+        <details open={!added.length}>
+          <summary><b>Complete the history</b></summary>
+          <form method="post" action={`/receipts/${r.receipt_no}/history`} className="grid">
+            <Csrf c={c} />
+            <label className="field"><span>Grade</span><input name="grade" /></label>
+            <label className="field"><span>Moisture at intake (%)</span><input name="moisture_pct" inputMode="decimal" /></label>
+            <label className="field"><span>Bags</span><input name="bags" inputMode="numeric" /></label>
+            <label className="field"><span>Price at storage (₦ per kg)</span><input name="naira_per_kg_at_storage" inputMode="decimal" /></label>
+            <label className="field"><span>How it ended</span><select name="ended" defaultValue=""><option value="">Choose…</option>{Object.entries(ENDINGS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+            <label className="field"><span>Ended on</span><input name="ended_on" type="date" /></label>
+            <label className="field"><span>Buyer</span><input name="buyer" /></label>
+            <label className="field"><span>Sale price (₦ per kg)</span><input name="sale_naira_per_kg" inputMode="decimal" /></label>
+            <label className="field wide"><span>Where this comes from</span><input name="source" required placeholder="e.g. Billiri warehouse ledger p.14; sale invoice INV-0021" /></label>
+            <button className="primary">Add to the history</button>
+          </form>
+        </details>
+      )}
+    </section>
+  );
+}
+
 const TERM_TONE = { in_term: 'ok', ending: 'warn', past: 'bad', done: '' } as const;
 /** Storage term and how much of it is left: what tells a lender or buyer the receipt is still good to rely on. */
 export function TermBadge({ t }: { t: ReturnType<typeof termOf> }) {
@@ -83,6 +124,7 @@ export function ReceiptPage({ c, r, events, chainOk, url, bal, rels, value, hist
       </div>
       {value && <ValuePanel v={value} />}
       {history && <ValueHistory title="Value over time" value={history} />}
+      {r.source !== 'app' && <OldRecord c={c} r={r} events={events} edit={kitovu && can(c.membership, 'receipts.issue')} />}
       <section className="card">
         <h2>History</h2>
         <p className={chainOk ? 'ok' : 'bad'}>{chainOk ? `History intact: ${events.length} event${events.length === 1 ? '' : 's'}, each sealed to the one before.` : 'History check FAILED: an event does not match its seal. Report this to Kitovu at once.'}</p>

@@ -1,5 +1,17 @@
 # Legacy import (2021–22 StorageX)
 
+## Running it on the server
+
+`node dist/cli.mjs legacy-import --token-stdin` with a GitHub token (read-only, Contents on heirmexxy/storagex) on
+standard input fetches the export, imports it, runs the data steward, prints counts and leaves no copy behind. It can
+be run again safely: nothing is copied twice. With a file path instead, it imports that file.
+
+After the import, **Admin → Review queue → Records to complete** lists every record that falls short of today's
+standard (phone confirmed, identity checked, profile photo, LGA, crops, year of birth and sex; field partners checked;
+warehouse contact, address, GPS, capacity, WareGuard link; and, for retired receipts, grade, moisture, bags, value
+at storage and how it ended). Each item closes itself once the record is filled in. Retired receipts cannot be
+changed, so what paper records show is added on the receipt under "Complete the history", with its source.
+
 Source: `storagex_laravel_portal.sql` from the old `heirmexxy/storagex` repo. All stock in it has been liquidated.
 
 ## What was imported, and how

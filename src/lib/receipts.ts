@@ -128,6 +128,38 @@ export function lotsFor(net: number, bags: number, input: string) {
 // ---------- storage term ----------
 const OPEN = ['closed', 'settled', 'cancelled', 'expired'];
 export { termOf, lagosDay, dayText as ymdText };
+// ---------- history of receipts from the old system ----------
+// A retired receipt's facts are frozen, so what the paper records show is added as an event on its history (hash-chained,
+// with who added it and where it came from). The receipt page shows it marked "added later".
+export const ENDINGS = { sold: 'Sold', collected: 'Collected by the depositor', liquidated: 'Liquidated (lender or Kitovu sold it)', lost: 'Lost or written off', unknown: 'Not known' } as const;
+export async function addHistory(a: Actor, no: string, i: Record<string, string>) {
+  if (!isKitovu(a) || !can(a.membership, 'receipts.issue')) throw new UserError('Only Kitovu adds history to old receipts.');
+  const r = await receiptByNo(a, no);
+  if (!r) throw new UserError('Receipt not found.');
+  if (r.source === 'app') throw new UserError('Only receipts brought over from the old system take added history.');
+  const num = (v: string | undefined, lo: number, hi: number, label: string) => {
+    if (!v?.trim()) return null; const n = Number(v.replace(/,/g, '')); if (!Number.isFinite(n) || n < lo || n > hi) throw new UserError(`${label} is out of range.`); return n;
+  };
+  const ended = (Object.keys(ENDINGS) as (keyof typeof ENDINGS)[]).includes(i.ended as any) ? i.ended as keyof typeof ENDINGS : null;
+  const data = {
+    grade: clean(i.grade, 20) || null,
+    moisture_pct: num(i.moisture_pct, 1, 40, 'Moisture'),
+    bags: num(i.bags, 1, 100000, 'Bags'),
+    naira_per_kg_at_storage: num(i.naira_per_kg_at_storage, 1, 100000, 'Price at storage'),
+    ended, ended_on: /^\d{4}-\d{2}-\d{2}$/.test(i.ended_on ?? '') ? i.ended_on : null,
+    buyer: clean(i.buyer, 120) || null,
+    sale_naira_per_kg: num(i.sale_naira_per_kg, 1, 100000, 'Sale price'),
+    source: clean(i.source, 300),
+  };
+  if (data.source.length < 5) throw new UserError('Say where this comes from (e.g. warehouse ledger page 14, sale invoice INV-0021).');
+  if (Object.entries(data).filter(([k, v]) => k !== 'source' && v !== null).length === 0) throw new UserError('Fill in at least one fact.');
+  if (data.ended_on && data.ended_on > lagosDay()) throw new UserError('The end date cannot be in the future.');
+  await tx(async () => {
+    await db.run(`INSERT INTO receipt_events (receipt_id, event_type, occurred_at, actor, data) VALUES ($1,'history_added',now(),$2,$3)`, r.id, `user:${a.user.id}`, JSON.stringify(data));
+    await audit(actorOf(a), 'receipt.history_added', { entity: 'receipt', entityId: r.id, data: { receipt_no: r.receipt_no } });
+  });
+}
+
 /** The term for a new receipt: the issuer's choice, else the default, never past the crop's limit. */
 export async function chooseTerm(months: unknown, cropMax: number) {
   const def = Math.min((await getSettings())['receipts.default_storage_months'], cropMax);
@@ -279,7 +311,7 @@ export const PUBLIC_STATUS: Record<string, { label: string; tone: 'ok' | 'warn' 
   cancelled: { label: 'Cancelled', tone: 'bad', note: 'This receipt was cancelled and is not valid.' },
   expired: { label: 'Expired', tone: 'bad', note: 'This receipt has expired.' },
 };
-export const EVENT_LABEL: Record<string, string> = { issued: 'Issued', cancelled: 'Cancelled', released: 'Part withdrawn', pledged: 'Pledged to a lender', financed: 'Loan paid out', lien_released: 'Pledge released', sale_approved: 'Sale agreed', sale_cancelled: 'Sale cancelled', settled: 'Sold and settled', review_started: 'Put under review', review_ended: 'Review ended', legacy_issued: 'Issued (old system)', legacy_closed: 'Closed (old system)', liquidated: 'Liquidated', closed: 'Closed', term_extended: 'Storage term extended' };
+export const EVENT_LABEL: Record<string, string> = { issued: 'Issued', cancelled: 'Cancelled', released: 'Part withdrawn', pledged: 'Pledged to a lender', financed: 'Loan paid out', lien_released: 'Pledge released', sale_approved: 'Sale agreed', sale_cancelled: 'Sale cancelled', settled: 'Sold and settled', review_started: 'Put under review', review_ended: 'Review ended', legacy_issued: 'Issued (old system)', legacy_closed: 'Closed (old system)', liquidated: 'Liquidated', closed: 'Closed', term_extended: 'Storage term extended', history_added: 'History added from old records' };
 
 export async function passport(token: string, sig: string | undefined, ip: string) {
   if (!(await rateLimit(`passport:${ip}`, 120, 600))) throw new UserError('Too many checks from this network. Wait a few minutes.');

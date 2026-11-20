@@ -208,21 +208,27 @@ export async function setFarmerStatus(a: Actor, code: string, status: 'active' |
 // ---------- data-quality review queue ----------
 export interface Issue { id: string; entity: string; entity_id: string | null; legacy_ref: string | null; severity: string; code: string; detail: string; resolved_at: Date | null; resolved_by: string | null; label: string | null; link: string | null }
 
-export async function openIssues(a: Actor, o: { entity?: string; entityId?: string; includeInfo?: boolean; includeResolved?: boolean } = {}) {
+export async function openIssues(a: Actor, o: { entity?: string; entityId?: string; includeInfo?: boolean; includeResolved?: boolean; code?: string; limit?: number } = {}) {
   if (!isKitovu(a) || !(can(a.membership, 'farmers.edit') || can(a.membership, 'warehouses.edit'))) throw new NotAllowed('Only Kitovu operations can see the review queue.');
   return db.all<Issue>(
     `SELECT di.id::text, di.entity, di.entity_id, di.legacy_ref, di.severity, di.code, di.detail, di.resolved_at, di.resolved_by,
        COALESCE(f.code || ' ' || f.full_name, fp.code || ' ' || fp.full_name, w.code || ' ' || w.name, r.receipt_no, us.full_name || ' (' || us.email || ')') AS label, di.source,
-       CASE WHEN f.id IS NOT NULL THEN '/farmers/' || f.code WHEN fp.id IS NOT NULL THEN '/field-partners#' || fp.code WHEN w.id IS NOT NULL THEN '/warehouses/' || w.code END AS link
+       CASE WHEN f.id IS NOT NULL THEN '/farmers/' || f.code WHEN fp.id IS NOT NULL THEN '/field-partners#' || fp.code WHEN w.id IS NOT NULL THEN '/warehouses/' || w.code WHEN r.id IS NOT NULL THEN '/receipts/' || r.receipt_no END AS link
      FROM data_issues di
        LEFT JOIN farmers f ON di.entity='farmer' AND f.id=di.entity_id
        LEFT JOIN field_partners fp ON di.entity='field_partner' AND fp.id=di.entity_id
        LEFT JOIN warehouses w ON di.entity='warehouse' AND w.id=di.entity_id
        LEFT JOIN receipts r ON di.entity='receipt' AND r.id=di.entity_id
        LEFT JOIN users us ON di.entity='user' AND us.id=di.entity_id
-     WHERE ($1 = '' OR di.entity=$1) AND ($2::uuid IS NULL OR di.entity_id=$2) AND ($3 OR di.severity <> 'info') AND ($4 OR di.resolved_at IS NULL)
-     ORDER BY di.resolved_at IS NOT NULL, CASE di.severity WHEN 'blocker' THEN 0 WHEN 'review' THEN 1 ELSE 2 END, di.entity, di.id LIMIT 500`,
-    clean(o.entity, 30), o.entityId ?? null, !!o.includeInfo, !!o.includeResolved);
+     WHERE ($1 = '' OR di.entity=$1) AND ($2::uuid IS NULL OR di.entity_id=$2) AND ($3 OR di.severity <> 'info') AND ($4 OR di.resolved_at IS NULL) AND ($5 = '' OR di.code=$5)
+     ORDER BY di.resolved_at IS NOT NULL, CASE di.severity WHEN 'blocker' THEN 0 WHEN 'review' THEN 1 ELSE 2 END, di.entity, di.code, label, di.id LIMIT $6`,
+    clean(o.entity, 30), o.entityId ?? null, !!o.includeInfo, !!o.includeResolved, clean(o.code, 60), o.limit ?? 500);
+}
+/** Open items by kind, for the summary at the top of the review queue. */
+export async function issueSummary(a: Actor) {
+  if (!isKitovu(a)) throw new NotAllowed('Only Kitovu operations can see the review queue.');
+  return db.all<{ entity: string; code: string; severity: string; n: number }>(
+    `SELECT entity, code, max(severity) AS severity, count(*)::int AS n FROM data_issues WHERE resolved_at IS NULL AND severity <> 'info' GROUP BY entity, code ORDER BY entity, n DESC`);
 }
 
 export async function resolveIssue(a: Actor, issueId: string, note: string) {

@@ -452,7 +452,7 @@ export function IssueTable({ c, rows, showRecord }: { c: Ctx; rows: Issue[]; sho
   );
 }
 
-export function ReviewQueuePage({ c, rows, q, run }: { c: Ctx; rows: Issue[]; q: Record<string, string>; run?: any }) {
+export function ReviewQueuePage({ c, rows, q, run, summary }: { c: Ctx; rows: Issue[]; q: Record<string, string>; run?: any; summary?: { entity: string; code: string; severity: string; n: number }[] }) {
   const open = rows.filter((r) => !r.resolved_at && r.severity !== 'info').length;
   return (
     <Page c={c} title="Review queue">
@@ -464,10 +464,29 @@ export function ReviewQueuePage({ c, rows, q, run }: { c: Ctx; rows: Issue[]; q:
           <br /><small className="muted">It closes its own items once the problem is fixed. Resolve one by hand only if it is not a problem (for example, two farmers who really share a name); it will not be raised again.</small></span>
         <button>Check now</button>
       </form>
+      {summary && summary.length > 0 && (
+        <section className="card">
+          <h2>Records to complete</h2>
+          <p className="muted">Each item closes itself once the record is filled in to today’s standard. Download the list to share the work out.</p>
+          <table>
+            <thead><tr><th>Record</th><th>What is missing</th><th>Open</th><th></th></tr></thead>
+            <tbody>{summary.map((s) => (
+              <tr key={s.entity + s.code}>
+                <td>{s.entity.replace('_', ' ')}</td>
+                <td>{s.code.replace(/_/g, ' ')}<br /><small className="muted">{EXPLAIN[s.code] ?? ''}</small></td>
+                <td>{s.n}</td>
+                <td><a href={`/review?entity=${s.entity}&code=${s.code}`}>Show</a> · <a href={`/review.csv?entity=${s.entity}&code=${s.code}`}>Download</a></td>
+              </tr>
+            ))}</tbody>
+          </table>
+          <p><a href="/review.csv">Download everything open (CSV)</a></p>
+        </section>
+      )}
       <form className="filters card" method="get">
         <select name="entity" defaultValue={q.entity ?? ''} aria-label="Record type">
           <option value="">All records</option><option value="farmer">Farmers</option><option value="field_partner">Field partners</option><option value="warehouse">Warehouses</option><option value="insurance_policy">Insurance</option><option value="receipt">Receipts</option><option value="user">User accounts</option>
         </select>
+        {q.code && <input type="hidden" name="code" value={q.code} />}
         <label className="check"><input type="checkbox" name="info" value="1" defaultChecked={q.info === '1'} /> Include notes</label>
         <label className="check"><input type="checkbox" name="resolved" value="1" defaultChecked={q.resolved === '1'} /> Include resolved</label>
         <button>Show</button>

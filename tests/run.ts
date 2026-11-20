@@ -1252,7 +1252,7 @@ async function main() {
     ok(first.opened > 0, JSON.stringify(first));
     eq((await DS.runSteward('test')).opened, 0, 'running again changes nothing');
     const maduId = (await R.farmerByCode(ops, madu))!.id;
-    const mine = () => db.all<any>(`SELECT * FROM data_issues WHERE source='steward' AND entity_id=$1 AND resolved_at IS NULL`, maduId);
+    const mine = () => db.all<any>(`SELECT * FROM data_issues WHERE source='steward' AND entity_id=$1 AND resolved_at IS NULL AND code <> ALL($2::text[])`, maduId, DS.COMPLETENESS);
     ok((await mine()).some((x) => x.code === 'farmer_single_name'));
     ok((await R.farmerByCode(ops, madu))!.needs_review);
     await db.run(`UPDATE farmers SET full_name='Madu Okafor' WHERE id=$1`, maduId);
@@ -1919,6 +1919,40 @@ async function main() {
       const st = await req('GET', '/admin/settings'); ok(st.text.includes('Live updates on'), 'connections panel shows it');
       delete jar.sx_sid;
     } finally { (CFG as any).titanKey = ''; }
+  });
+  await t('old records: flagged against today’s standard, retired receipts take added history, the list downloads', async () => {
+    const adaId = (await db.val<string>('SELECT id FROM farmers WHERE code=$1', ada))!;
+    const wh = (await db.val<string>(`SELECT id FROM warehouses WHERE code='WH-NI-MNA-02'`))!;
+    const rid = (await db.val<string>(`INSERT INTO receipts (receipt_no, depositor_farmer_id, owner_farmer_id, warehouse_id, commodity_code, net_weight_kg, status, issued_at, closed_at, closed_reason, source)
+      VALUES ('SX-NI-MNA-220101-0001', $1, $1, $2, 'SBN', 1006.2, 'closed', '2022-01-01', '2022-06-01', 'Liquidated before migration', 'legacy_import') RETURNING id`, adaId, wh))!;
+    await db.run(`INSERT INTO receipt_events (receipt_id, event_type, occurred_at, actor, data) VALUES ($1,'issued','2022-01-01','system:legacy-import','{}')`, rid);
+    const lonely = await R.createFarmer(ops, { full_name: 'Halima Garba', state_code: 'NI' });
+    const lid = (await db.val<string>('SELECT id FROM farmers WHERE code=$1', lonely))!;
+    await DS.runSteward('test');
+    const open = async (code: string, id: string) => !!(await db.val(`SELECT 1 FROM data_issues WHERE code=$1 AND entity_id=$2 AND resolved_at IS NULL`, code, id));
+    ok(await open('receipt_history_incomplete', rid));
+    ok(await open('farmer_identity_unchecked', lid) && await open('farmer_no_phone', lid) && await open('farmer_profile_incomplete', lid));
+    ok((await db.val<string>(`SELECT detail FROM data_issues WHERE code='farmer_profile_incomplete' AND entity_id=$1 AND resolved_at IS NULL`, lid))!.includes('profile photo'));
+    const appNo = (await db.val<string>(`SELECT receipt_no FROM receipts WHERE source='app' LIMIT 1`))!;
+    ok(await rejects(Rc.addHistory(admin, appNo, { grade: '1', source: 'ledger page 3' })), 'only old receipts');
+    ok(await rejects(Rc.addHistory(officer, 'SX-NI-MNA-220101-0001', { grade: '1', source: 'ledger page 3' })), 'Kitovu only');
+    ok(await rejects(Rc.addHistory(admin, 'SX-NI-MNA-220101-0001', { grade: '1', source: '' })), 'a source is required');
+    ok(await rejects(Rc.addHistory(admin, 'SX-NI-MNA-220101-0001', { source: 'ledger page 3' })), 'at least one fact');
+    await Rc.addHistory(admin, 'SX-NI-MNA-220101-0001', { grade: '2', moisture_pct: '11.5', bags: '20', ended: 'sold', ended_on: '2022-06-01', buyer: 'Mainland Feeds', sale_naira_per_kg: '410', source: 'Billiri ledger p.14; invoice 0021' });
+    ok(await Rc.chainOk(rid), 'added history is sealed into the chain');
+    await DS.runSteward('test');
+    ok(!(await open('receipt_history_incomplete', rid)), 'closes itself');
+    await signInAs(admin);
+    const pg = await req('GET', '/receipts/SX-NI-MNA-220101-0001'); ok(pg.text.includes('From the old StorageX system') && pg.text.includes('Mainland Feeds') && pg.text.includes('₦410/kg'));
+    const rq = await req('GET', '/review'); ok(rq.text.includes('Records to complete') && rq.text.includes('farmer profile incomplete'));
+    const f = await req('GET', '/review?entity=farmer&code=farmer_identity_unchecked'); ok(f.text.includes('Halima Garba') && !f.text.includes('field partner unverified</td>'));
+    const csv = await req('GET', '/review.csv?entity=farmer&code=farmer_profile_incomplete');
+    eq(csv.status, 200); ok(csv.text.startsWith('record,type,issue') && csv.text.includes('Halima Garba') && csv.text.includes('/farmers/'));
+    ok(!/\+234\d{10}/.test(csv.text), 'no phone numbers in the download');
+    delete jar.sx_sid;
+    await signInAs(officer);
+    eq((await req('GET', '/review.csv')).status, 403);
+    delete jar.sx_sid;
   });
   server.close();
 

@@ -24,6 +24,7 @@ get('/receipts/:no/pdf', 'perm:receipts.view', async (c) => {
   try { const { pdf, name } = await Rc.receiptPdf(c.actor, c.params.no); c.bytes(pdf, 'application/pdf', name); }
   catch (e) { if (e instanceof UserError) throw new HttpError(404, e.message); throw e; }
 });
+post('/receipts/:no/history', 'perm:receipts.issue', (c) => act(c, `/receipts/${c.params.no}`, async () => { await Rc.addHistory(c.actor, c.params.no, c.body); return 'Added to the receipt’s history.'; }));
 post('/receipts/:no/extend', 'perm:receipts.issue', (c) => act(c, `/receipts/${c.params.no}`, async () => `Storage term extended to ${Rc.ymdText(await Rc.extendTerm(c.actor, c.params.no, c.body))}.`));
 post('/receipts/:no/cancel', 'perm:receipts.issue', (c) => act(c, `/receipts/${c.params.no}`, async () => { await Rc.cancelReceipt(c.actor, c.params.no, c.body.reason); return 'Receipt cancelled.'; }));
 

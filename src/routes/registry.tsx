@@ -127,7 +127,16 @@ get('/files/:id', 'auth', async (c) => {
 // ---------- review queue ----------
 get('/review', 'perm:farmers.edit', async (c) => {
   const q = c.query;
-  c.html(render(<ReviewQueuePage c={c} q={q} rows={await R.openIssues(c.actor, { entity: q.entity, includeInfo: q.info === '1', includeResolved: q.resolved === '1' })} run={await DS.lastRun()} />));
+  c.html(render(<ReviewQueuePage c={c} q={q} rows={await R.openIssues(c.actor, { entity: q.entity, code: q.code, includeInfo: q.info === '1', includeResolved: q.resolved === '1' })} run={await DS.lastRun()} summary={await R.issueSummary(c.actor)} />));
+});
+// The open list as a spreadsheet for the field team (names and links, no ID numbers or phone numbers).
+get('/review.csv', 'perm:farmers.edit', async (c) => {
+  const rows = await R.openIssues(c.actor, { entity: c.query.entity, code: c.query.code, limit: 20000 });
+  const cell = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) || /^[=+\-@]/.test(s) ? `"${(/^[=+\-@]/.test(s) ? "'" : '') + s.replace(/"/g, '""')}"` : s; };
+  const lines = [['record', 'type', 'issue', 'detail', 'what to do', 'link'].join(',')].concat(rows.map((i) =>
+    [i.label ?? i.legacy_ref, i.entity.replace('_', ' '), i.code.replace(/_/g, ' '), i.detail, DS.EXPLAIN[i.code] ?? '', i.link ? `${config.baseUrl}${i.link}` : ''].map(cell).join(',')));
+  await audit(actorOf(c.actor), 'review.exported', { data: { rows: rows.length, entity: c.query.entity ?? null, code: c.query.code ?? null } });
+  c.bytes(Buffer.from(lines.join('\n') + '\n'), 'text/csv', `storagex-records-to-complete-${new Date().toISOString().slice(0, 10)}.csv`);
 });
 post('/review/steward-run', 'perm:farmers.edit', (c) => act(c, '/review', async () => {
   if (c.membership?.org_kind !== 'kitovu') throw new UserError('Kitovu only.');

@@ -26,7 +26,21 @@ export const EXPLAIN: Record<string, string> = {
   warehouse_insurance_expiring: 'The insurance policy ends within 30 days.',
   warehouse_count_overdue: 'Holds stock but has not been counted within the count interval.',
   user_dormant: 'Has access but has not signed in for 90 days. Remove the access if it is no longer needed.',
+  // Today's standard for a complete record (old records and new ones alike). Each closes itself once filled in.
+  farmer_no_phone: 'No usable phone number, so the farmer gets no codes or texts. Add it on the farmer page and confirm it.',
+  farmer_phone_unconfirmed: 'The phone number has not been confirmed with a code or a witnessed check. Confirm it on the farmer page.',
+  farmer_identity_unchecked: 'Identity not checked: no ID type, last four digits or ID photo. Do the identity check before any receipt or loan.',
+  farmer_profile_incomplete: 'Fields today’s registration asks for are empty. Fill them in on the farmer page.',
+  field_partner_unverified: 'Came from the old system and has not been checked. Confirm the person, phone and network, then verify or deactivate them.',
+  warehouse_not_on_titan: 'Not linked to a WareGuard site on Titan, so no live conditions. Link it on the warehouse page once WareGuard is installed.',
+  warehouse_profile_incomplete: 'Fields today’s warehouse profile asks for are empty. Fill them in on the warehouse page.',
+  receipt_history_incomplete: 'A retired receipt from the old system with facts that were never recorded. Add what the paper records show under “Complete the history” on the receipt.',
 };
+
+/** Gaps against today's standard for a complete record. They are listed for completing, but do not mark the record
+ *  "needs review" (that badge is kept for real problems such as duplicates). */
+export const COMPLETENESS = ['farmer_no_phone', 'farmer_phone_unconfirmed', 'farmer_identity_unchecked', 'farmer_profile_incomplete', 'field_partner_unverified',
+  'warehouse_not_on_titan', 'warehouse_profile_incomplete', 'receipt_history_incomplete'];
 
 async function findings(): Promise<Finding[]> {
   const out: Finding[] = [];
@@ -67,11 +81,43 @@ async function findings(): Promise<Finding[]> {
       WHERE fp.phone_e164 IS NOT NULL AND fp.status='active' GROUP BY fp.id, fp.code`))
     out.push({ entity: 'field_partner', id: r.id, code: 'field_partner_shares_farmer_phone', severity: 'blocker', detail: `${r.n} farmer record(s) use this field partner’s phone number.` });
 
+  // ---------- today's standard for a complete record ----------
+  const fullFs = await db.all<any>(`SELECT f.id, f.kind, f.phone_e164, f.phone_verified_at, f.phone_check_method, f.kyc_level, f.profile_photo_id, f.lga_id, f.community,
+      f.commodities, f.year_of_birth, f.sex, f.contact_person,
+      EXISTS (SELECT 1 FROM receipts r WHERE r.owner_farmer_id=f.id AND r.status IN ${LIVE}) AS has_stock
+    FROM farmers f WHERE f.status='active'`);
+  for (const f of fullFs) {
+    if (!f.phone_e164) out.push({ entity: 'farmer', id: f.id, code: 'farmer_no_phone', severity: 'review', detail: 'No phone number.' });
+    else if (!f.phone_verified_at && f.phone_check_method !== 'attested' && !f.has_stock)
+      out.push({ entity: 'farmer', id: f.id, code: 'farmer_phone_unconfirmed', severity: 'review', detail: 'Phone not confirmed.' });
+    if (!f.kyc_level) out.push({ entity: 'farmer', id: f.id, code: 'farmer_identity_unchecked', severity: 'review', detail: 'Identity not checked.' });
+    const gaps = [
+      !f.profile_photo_id && 'profile photo', !f.lga_id && 'local government area', !f.community && 'community',
+      !(f.commodities?.length) && 'crops grown',
+      ...(f.kind === 'agribusiness' ? [!f.contact_person && 'contact person'] : [!f.year_of_birth && 'year of birth', !f.sex && 'sex']),
+    ].filter(Boolean) as string[];
+    if (gaps.length) out.push({ entity: 'farmer', id: f.id, code: 'farmer_profile_incomplete', severity: 'review', detail: `Missing: ${gaps.join(', ')}.` });
+  }
+  for (const p of await db.all<any>(`SELECT id, phone_e164, state_code FROM field_partners WHERE status='legacy_unverified'`))
+    out.push({ entity: 'field_partner', id: p.id, code: 'field_partner_unverified', severity: 'review', detail: `Not checked since the old system${p.phone_e164 ? '' : '; no phone'}${p.state_code ? '' : '; no state'}.` });
+  for (const w of await db.all<any>(`SELECT id, titan_site_id, contact_name, contact_phone, lga_id, commodities, address_text, status FROM warehouses WHERE status <> 'closed'`)) {
+    if (!w.titan_site_id && w.status !== 'dormant') out.push({ entity: 'warehouse', id: w.id, code: 'warehouse_not_on_titan', severity: 'review', detail: 'No WareGuard site linked.' });
+    const gaps = [!w.contact_name && 'site contact', !w.contact_phone && 'contact phone', !w.lga_id && 'local government area', !w.address_text && 'address', !(w.commodities?.length) && 'crops stored'].filter(Boolean);
+    if (gaps.length) out.push({ entity: 'warehouse', id: w.id, code: 'warehouse_profile_incomplete', severity: 'review', detail: `Missing: ${gaps.join(', ')}.` });
+  }
+  for (const r of await db.all<any>(`SELECT r.id, r.grade, r.moisture_pct, r.bags, r.issue_value_kobo, r.unit_price_kobo, r.insurance_policy_id, r.depositor_farmer_id,
+      EXISTS (SELECT 1 FROM sale_items si WHERE si.receipt_id=r.id) AS sold
+    FROM receipts r WHERE r.source <> 'app' AND NOT EXISTS (SELECT 1 FROM receipt_events e WHERE e.receipt_id=r.id AND e.event_type='history_added')`)) {
+    const gaps = [!r.grade && 'grade', r.moisture_pct == null && 'moisture', !r.bags && 'number of bags', !r.issue_value_kobo && !r.unit_price_kobo && 'value at storage',
+      !r.depositor_farmer_id && 'depositor', !r.sold && 'how it ended (sale date, buyer, price)'].filter(Boolean);
+    if (gaps.length) out.push({ entity: 'receipt', id: r.id, code: 'receipt_history_incomplete', severity: 'review', detail: `Not recorded: ${gaps.join(', ')}.` });
+  }
+
   const whs = await db.all<any>(`SELECT w.id, w.lat, w.capacity_kg, w.status,
       (SELECT COALESCE(sum(b.remaining_kg),0)::float FROM receipts r JOIN receipt_balances b ON b.receipt_id=r.id WHERE r.warehouse_id=w.id AND r.status IN ${LIVE}) AS kg,
       (SELECT max(cover_to) FROM insurance_policies p WHERE p.warehouse_id=w.id AND p.status='active' AND (p.cover_from IS NULL OR p.cover_from <= current_date) AND p.cover_to >= current_date) AS cover_to,
       (SELECT max(counted_at) FROM stock_counts c WHERE c.warehouse_id=w.id) AS counted
-    FROM warehouses w WHERE w.status IN ('onboarding','certified','active')`);
+    FROM warehouses w WHERE w.status IN ('onboarding','certified','active','dormant')`);
   for (const w of whs) {
     if (w.lat == null) out.push({ entity: 'warehouse', id: w.id, code: 'warehouse_no_location', severity: 'review', detail: 'No map location.' });
     if (w.capacity_kg == null) out.push({ entity: 'warehouse', id: w.id, code: 'warehouse_no_capacity', severity: 'review', detail: 'No capacity recorded.' });
@@ -119,9 +165,9 @@ export async function runSteward(startedBy = 'cron') {
       create.map((f) => f.entity), create.map((f) => f.id), create.map((f) => f.severity), create.map((f) => f.code), create.map((f) => f.detail));
     if (gone.length) await db.run(`UPDATE data_issues SET resolved_at=now(), resolved_by=$2, resolved_note='No longer found by the data steward.' WHERE id = ANY($1::bigint[])`, gone.map((o) => o.id), ACTOR);
     // Farmers' "needs review" mark follows their open items.
-    await db.run(`UPDATE farmers f SET needs_review=true WHERE f.id = ANY($1::uuid[]) AND NOT f.needs_review`, create.filter((f) => f.entity === 'farmer' && f.severity !== 'info').map((f) => f.id));
+    await db.run(`UPDATE farmers f SET needs_review=true WHERE f.id = ANY($1::uuid[]) AND NOT f.needs_review`, create.filter((f) => f.entity === 'farmer' && f.severity !== 'info' && !COMPLETENESS.includes(f.code)).map((f) => f.id));
     await db.run(`UPDATE farmers f SET needs_review=false WHERE f.id = ANY($1::uuid[]) AND f.needs_review
-      AND NOT EXISTS (SELECT 1 FROM data_issues d WHERE d.entity='farmer' AND d.entity_id=f.id AND d.resolved_at IS NULL AND d.severity<>'info')`, gone.filter((o) => o.entity === 'farmer').map((o) => o.entity_id));
+      AND NOT EXISTS (SELECT 1 FROM data_issues d WHERE d.entity='farmer' AND d.entity_id=f.id AND d.resolved_at IS NULL AND d.severity<>'info' AND d.code <> ALL($2::text[]))`, gone.filter((o) => o.entity === 'farmer').map((o) => o.entity_id), COMPLETENESS);
     const opened = create.length, closed = gone.length;
     const stillOpen = Number(await db.val(`SELECT count(*) FROM data_issues WHERE source='steward' AND resolved_at IS NULL`));
     await db.run(`UPDATE steward_runs SET finished_at=now(), opened=$2, closed=$3, still_open=$4, by_code=$5 WHERE id=$1`, run, opened, closed, stillOpen, JSON.stringify(byCode));

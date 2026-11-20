@@ -9,6 +9,10 @@
 //   remind                       text farmers whose loans fall due soon or were missed (run daily)
 //   steward                      data steward: find and close registry problems (run daily)
 //   purge-files                  delete ID photos whose retention date has passed (run daily)
+//   legacy-import [dump.sql]     bring in the 2021–22 StorageX records (farmers, field partners, warehouses, receipts),
+//                                then flag every record that falls short of today's standard. With --token-stdin and
+//                                no file, fetches the dump from the private heirmexxy/storagex repository with a
+//                                GitHub token read from standard input. Safe to run again: nothing is copied twice.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -130,6 +134,37 @@ async function main() {
       for (const e of r!.errors) console.log(`  Problem: ${e}`);
       try { const w = await T.subscribe(); console.log(`Live updates switched on: Titan will send changes to ${w.url}.`); }
       catch (e: any) { console.log(`Live updates not switched on: ${e.message} Readings are still fetched every 10 minutes.`); }
+      break;
+    }
+    case 'legacy-import': {
+      const os = await import('node:os');
+      const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sx-legacy-'));
+      try {
+        let dump = args.find((a) => !a.startsWith('--'));
+        if (!dump) {
+          if (!args.includes('--token-stdin')) { console.error('Give the dump file, or --token-stdin to fetch it from GitHub.'); process.exitCode = 1; break; }
+          const token = fs.readFileSync(0, 'utf8').trim();
+          if (!token) { console.error('No GitHub token on standard input.'); process.exitCode = 1; break; }
+          const r = await fetch('https://api.github.com/repos/heirmexxy/storagex/contents/storagex_laravel_portal.sql', {
+            headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.raw', 'User-Agent': 'storagex-legacy-import' }, signal: AbortSignal.timeout(120_000) });
+          if (!r.ok) { console.error(`GitHub answered ${r.status}. Check the token can read heirmexxy/storagex (Contents: read).`); process.exitCode = 1; break; }
+          dump = path.join(work, 'legacy.sql');
+          fs.writeFileSync(dump, Buffer.from(await r.arrayBuffer()), { mode: 0o600 });
+          console.log(`Fetched the old StorageX database export (${Math.round(fs.statSync(dump).size / 1024)} KB).`);
+        }
+        const out = path.join(work, 'out');
+        const imp = spawnSync(process.execPath, [path.resolve('tools/legacy-import/import.mjs'), dump, out], { stdio: ['ignore', 'ignore', 'inherit'] });
+        if (imp.status !== 0) throw new Error('The importer could not read the export.');
+        await db.script(fs.readFileSync(path.join(out, 'legacy_import.sql'), 'utf8'));
+        const counts = await db.get<any>(`SELECT (SELECT count(*) FROM farmers WHERE source='legacy_import')::int AS farmers,
+            (SELECT count(*) FROM field_partners WHERE source='legacy_import')::int AS partners,
+            (SELECT count(*) FROM warehouses WHERE legacy IS NOT NULL)::int AS warehouses, (SELECT count(*) FROM receipts WHERE source='legacy_import')::int AS receipts`);
+        console.log(`In StorageX now from the old system: ${counts.farmers} farmers, ${counts.partners} field partners, ${counts.warehouses} warehouses, ${counts.receipts} retired receipt(s).`);
+        const s = await runSteward('legacy-import');
+        const open = await db.all<any>(`SELECT code, count(*)::int AS n FROM data_issues WHERE resolved_at IS NULL AND severity <> 'info' GROUP BY code ORDER BY n DESC`);
+        console.log(`Records to complete (see Review queue): ${s.open} open items.`);
+        for (const o of open) console.log(`  ${String(o.n).padStart(4)}  ${o.code.replace(/_/g, ' ')}`);
+      } finally { fs.rmSync(work, { recursive: true, force: true }); }      // the export holds personal data: nothing is left behind
       break;
     }
     case 'purge-files': {
