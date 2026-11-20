@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import type { Ctx } from '../lib/http';
 import type { ReceiptDoc } from '../lib/receipt-doc';
 import { ReceiptDocument } from './receipt-doc';
@@ -27,7 +28,7 @@ function OldRecord({ c, r, events, edit }: { c: Ctx; r: Receipt; events: any[]; 
           ['Price at storage', naira(d.naira_per_kg_at_storage)], ['How it ended', d.ended ? ENDINGS[d.ended as keyof typeof ENDINGS] : null], ['Ended on', d.ended_on], ['Buyer', d.buyer], ['Sale price', naira(d.sale_naira_per_kg)]];
         return (
           <div key={e.seq} className="added">
-            <dl className="facts">{rows.filter(([, v]) => v).map(([k, v]) => <><dt key={k}>{k}</dt><dd>{v}</dd></>)}</dl>
+            <dl className="facts">{rows.filter(([, v]) => v).map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>)}</dl>
             <p className="small muted">{`Added ${fmtDate(e.occurred_at)} by ${e.actor_name ?? e.actor}. Source: ${d.source}`}</p>
           </div>
         );

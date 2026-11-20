@@ -1626,7 +1626,9 @@ async function main() {
     await rejects(IDN.bvnCheck(officer, ada, '22222222222', fake as any));
     eq(await IDN.bvnCheck(compliance, ada, '222-2222-2229', fake as any), 'match');
     const row = await db.get<any>(`SELECT * FROM identity_checks ORDER BY checked_at DESC LIMIT 1`);
-    eq(row.last4, '2229'); ok(!JSON.stringify(row).includes('22222222229') && !JSON.stringify(row).includes('1990'), 'no number, no record');
+    eq(row.last4, '2229');
+    const kept = JSON.stringify(Object.entries(row).filter(([k]) => !/(^id$|_id$|_at$|hash)/.test(k)));   // ids and hashes are random and may hold any digits
+    ok(!kept.includes('22222222229') && !kept.includes('1990'), 'no number, no record');
     const nf = async () => ({ status: 404, json: async () => ({}) });
     eq(await IDN.bvnCheck(compliance, ada, '33333333333', nf as any), 'not_found');
     eq((await IDN.lookupNin('12345678901', 'Ada Okafor', fake as any))!.match, 'match');
